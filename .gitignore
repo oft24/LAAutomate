@@ -1,0 +1,25 @@
+# Entornos virtuales (cada equipo crea el suyo)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Configuracion real del equipo: nombres de servidores, correos, webhooks.
+# Solo se versiona .env.example con placeholders.
+.env
+
+# Estado de ejecucion -- se regenera solo, no es codigo
+logs/
+core/rpa.db
+*.log
+
+# Empaquetado con PyInstaller
+build/
+dist/
+
+# Herramientas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
