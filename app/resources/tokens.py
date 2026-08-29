@@ -25,6 +25,11 @@ class Colores:
     musgo_suave: str = "#E4F1E6"
     ocre: str = "#C17817"
     ocre_suave: str = "#F8ECD9"
+    # Tinte de fila para una ejecucion fallida en una tabla. Mas claro
+    # que oxido_suave (que es fondo de badge, sobre poca superficie):
+    # a lo ancho de una fila entera ese tono ya lee como bloque rojo y
+    # compite con el texto en vez de solo senalar donde mirar.
+    fila_error: str = "#FDF6F5"
 
 
 @dataclass(frozen=True)
