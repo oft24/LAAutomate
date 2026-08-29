@@ -130,9 +130,14 @@ class GrabadoraWeb:
         self._hilo: threading.Thread | None = None
         self._lock = threading.Lock()
         self.detencion_limpia = True
+        # Ultima URL vista por el hilo de sondeo. La UI la lee para
+        # mostrarla en vivo; NO puede preguntarle al driver por su cuenta
+        # (serian dos hilos sobre la misma sesion de Selenium).
+        self.url_actual: str | None = None
 
     def iniciar(self, url: str) -> None:
         self.pasos = [{"tipo": "ir_a", "url": url}]
+        self.url_actual = url
         self.web.ir_a(url)
         self._registrar_auto_inyeccion()
         self._inyectar_en_pagina_actual()
@@ -182,6 +187,37 @@ class GrabadoraWeb:
         self.logger.info("Grabación detenida: %d paso(s) capturados", len(pasos))
         return pasos
 
+    def cancelar(self, tiempo_espera_hilo: float = 5.0) -> int:
+        """Aborta la grabación, DESCARTA lo capturado y cierra el
+        navegador. Devuelve cuántos pasos se tiraron.
+
+        Se reusa detener() en vez de parar el hilo a mano porque toda la
+        cautela de ahí sigue aplicando: si el sondeo quedó bloqueado en un
+        alert()/confirm() nativo, tocar el driver desde este hilo serían
+        dos hilos sobre la misma sesión de Selenium. Lo único que cambia
+        es que el resultado se tira."""
+        pasos = self.detener(tiempo_espera_hilo=tiempo_espera_hilo)
+        with self._lock:
+            self.pasos = []
+        if self.detencion_limpia:
+            try:
+                self.web.cerrar()
+            except Exception as exc:  # noqa: BLE001 - cancelar nunca debe reventar
+                self.logger.debug("Error cerrando el navegador al cancelar: %s", exc)
+        else:
+            self.logger.warning(
+                "Grabación cancelada pero el navegador quedó abierto (el hilo de sondeo seguía "
+                "activo) -- ciérralo manualmente."
+            )
+        self.logger.info("Grabación cancelada por el usuario: %d paso(s) descartados", len(pasos))
+        return len(pasos)
+
+    def instantanea_de_pasos(self) -> list[dict]:
+        """Copia de los pasos capturados hasta ahora, para mostrarlos en
+        vivo. El hilo de sondeo extiende self.pasos bajo el mismo lock."""
+        with self._lock:
+            return [dict(p) for p in self.pasos]
+
     def _registrar_auto_inyeccion(self) -> None:
         """CDP: hace que el script se inyecte solo, automaticamente, en
         CUALQUIER pagina nueva que cargue de aqui en adelante -- se registra
@@ -229,6 +265,7 @@ class GrabadoraWeb:
                 self._inyectar_en_pagina_actual()
 
                 url_actual = driver.current_url
+                self.url_actual = url_actual
                 if url_actual != url_anterior:
                     with self._lock:
                         self.pasos.append({"tipo": "ir_a", "url": url_actual})

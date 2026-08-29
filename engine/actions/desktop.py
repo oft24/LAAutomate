@@ -9,6 +9,28 @@ from pathlib import Path
 
 SCREENSHOTS_DIR = Path("logs/screenshots")
 
+# type_keys() de pywinauto no escribe texto: habla SendKeys, donde ^ es
+# Ctrl, % es Alt, + es Shift, ~ es Enter y ( ) { } agrupan. Sin escapar,
+# escribir("usuario^admin") disparaba Ctrl+A (seleccionar todo) y lo
+# siguiente BORRABA el campo entero; una contraseña con ~ enviaba el
+# formulario a media escritura, y los parentesis desaparecian en silencio.
+# Cada uno se envuelve en llaves, que es como SendKeys pide un literal.
+_LITERALES_SENDKEYS = {
+    "^": "{^}",
+    "%": "{%}",
+    "+": "{+}",
+    "~": "{~}",
+    "(": "{(}",
+    ")": "{)}",
+    "{": "{{}",
+    "}": "{}}",
+}
+
+
+def escapar_para_type_keys(texto: str) -> str:
+    """Convierte texto literal en la forma que type_keys() teclea tal cual."""
+    return "".join(_LITERALES_SENDKEYS.get(caracter, caracter) for caracter in texto)
+
 
 class DesktopActions:
     def __init__(self, logger) -> None:
@@ -74,7 +96,10 @@ class DesktopActions:
                 "-- guarda las credenciales de esta automatización en la Bóveda de credenciales."
             )
         self._requiere_ventana()
-        self._ventana.type_keys(texto, with_spaces=True, pause=0.02)
+        # escapado: `texto` es un dato (lo que el usuario tecleo al grabar,
+        # o una credencial de la Boveda), nunca una secuencia de atajos --
+        # para eso esta atajo(), que si recibe sintaxis SendKeys cruda.
+        self._ventana.type_keys(escapar_para_type_keys(texto), with_spaces=True, pause=0.02)
 
     def esperar(self, segundos: float) -> None:
         time.sleep(segundos)

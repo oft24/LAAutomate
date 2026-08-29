@@ -48,7 +48,35 @@ import win32process
 
 from engine.actions.recorder import nombre_de_clase, validar_nombre  # reusa la misma validacion
 
-_TIPOS_EDITABLES = {"Edit", "ComboBox", "Document"}
+# Que controles admiten tecleo. Antes era una lista BLANCA de tres tipos
+# ({"Edit", "ComboBox", "Document"}) y todo lo demas descartaba el tecleo
+# en silencio -- lo que dejaba fuera los casos mas usados de esta app: el
+# lienzo de un cliente VNC/RDP (UIA lo ve como "Pane"), las apps
+# Electron/Chromium (campos expuestos como "Custom" o "Group") y los
+# controles sin control_type. Se invierte a lista NEGRA: escribir sobre un
+# boton o un menu no es texto, todo lo demas si puede serlo. Equivocarse
+# de mas aqui solo agrega un paso "escribir" revisable en el .py generado;
+# equivocarse de menos perdia la mitad de la grabacion sin dejar rastro.
+_TIPOS_NO_EDITABLES = {
+    "Button",
+    "CheckBox",
+    "Hyperlink",
+    "MenuBar",
+    "MenuItem",
+    "RadioButton",
+    "ScrollBar",
+    "Separator",
+    "SplitButton",
+    "TabItem",
+    "Thumb",
+    "TitleBar",
+    "ToolBar",
+    "TreeItem",
+}
+
+
+def _es_editable(tipo_control: str) -> bool:
+    return tipo_control not in _TIPOS_NO_EDITABLES
 
 # Tope al buscar cuantos controles comparten el mismo (texto, tipo) dentro
 # de la ventana grabada. Es solo para desambiguar un click; si hubiera mas
@@ -125,6 +153,7 @@ class GrabadoraEscritorio:
         self._ultimo_click_es_password = False
         self._se_tecleo_password = False
         self._clicks_ignorados_fuera_de_ventana = 0
+        self._teclas_ignoradas = 0
         self._ventanas_revinculadas = 0
         self._marca_conectar_tras_rebind = False
         self._necesita_conectar = False
@@ -144,6 +173,7 @@ class GrabadoraEscritorio:
         self._ultimo_click_es_password = False
         self._se_tecleo_password = False
         self._clicks_ignorados_fuera_de_ventana = 0
+        self._teclas_ignoradas = 0
         self._ventanas_revinculadas = 0
         self._marca_conectar_tras_rebind = False
         self._necesita_conectar = False
@@ -208,6 +238,11 @@ class GrabadoraEscritorio:
             self.logger.info(
                 "Se ignoraron %d click(s) fuera de la ventana grabada", self._clicks_ignorados_fuera_de_ventana
             )
+        if self._teclas_ignoradas:
+            self.logger.info(
+                "Se ignoraron %d tecla(s) porque el foco no era de la ventana grabada",
+                self._teclas_ignoradas,
+            )
         if self._ventanas_revinculadas:
             self.logger.info(
                 "La ventana objetivo se revinculó %d vez/veces durante la grabación",
@@ -215,6 +250,44 @@ class GrabadoraEscritorio:
             )
         self.logger.info("Grabación de escritorio detenida: %d paso(s) capturados", len(pasos))
         return pasos
+
+    def cancelar(self) -> int:
+        """Aborta la grabación y DESCARTA lo capturado. Devuelve cuántos
+        pasos se tiraron, solo para poder decírselo al usuario.
+
+        No es `detener()` con la lista ignorada: detener() espera hasta 8 s
+        a que la desambiguación termine de refinar pasos que aquí nadie va
+        a usar, y captura el título final para un código que no se va a
+        generar. Cancelar tiene que soltar los hooks de teclado/mouse YA --
+        es lo que hace alguien que se dio cuenta de que está grabando la
+        ventana equivocada."""
+        self._grabando = False
+        if self._listener_mouse is not None:
+            self._listener_mouse.stop()
+        if self._listener_teclado is not None:
+            self._listener_teclado.stop()
+
+        with self._lock:
+            descartados = len(self.pasos)
+            # se vacia EN EL LUGAR: el hilo de desambiguacion recibio esta
+            # misma lista por argumento y sigue con permiso de tocarla.
+            # Rebindear self.pasos a una lista nueva lo dejaria escribiendo
+            # en la vieja, y los pasos descartados reaparecerian.
+            self.pasos.clear()
+            self._buffer_texto = ""
+            self._se_tecleo_password = False
+
+        # el centinela termina el bucle; no se espera al hilo (daemon) --
+        # cancelar no debe bloquear la UI por algo cuyo resultado se tira.
+        if self._hilo_desambiguacion is not None:
+            self._cola_desambiguacion.put(None)
+            self._hilo_desambiguacion = None
+
+        self._hwnd_objetivo = None
+        self._paso_conectar_actual = None
+        self._necesita_conectar = False
+        self.logger.info("Grabación cancelada por el usuario: %d paso(s) descartados", descartados)
+        return descartados
 
     def _capturar_titulo_final(self) -> None:
         """El titulo de una ventana se observa a partir del SIGUIENTE
@@ -252,6 +325,37 @@ class GrabadoraEscritorio:
         posteriores se ignoran todos y sin esto el usuario no se entera
         hasta revisar el código generado."""
         return self._clicks_ignorados_fuera_de_ventana
+
+    @property
+    def teclas_ignoradas(self) -> int:
+        """Cuantas teclas se descartaron porque el foco de teclado no era
+        de la ventana grabada. Se expone por el mismo motivo que
+        clicks_ignorados: antes ese descarte era COMPLETAMENTE mudo -- ni
+        log ni contador -- y era la explicacion mas probable del reporte
+        "grabo los clicks pero no lo que escribo"."""
+        return self._teclas_ignoradas
+
+    @property
+    def titulo_objetivo(self) -> str | None:
+        """Titulo de la ventana que se esta grabando ahora mismo, o None si
+        todavia no hay una (nadie ha dado el primer click). Solo para
+        MOSTRARLO: la grabacion sigue atada al HWND, no al titulo -- que
+        cambia (Outlook le pone la carpeta abierta) y por eso nunca se usa
+        para decidir nada aqui."""
+        if self._hwnd_objetivo is None:
+            return None
+        try:
+            return win32gui.GetWindowText(self._hwnd_objetivo) or None
+        except Exception:
+            return None
+
+    def instantanea_de_pasos(self) -> list[dict]:
+        """Copia de los pasos capturados HASTA AHORA, para que la UI pueda
+        mostrarlos en vivo. Copia profunda de cada dict bajo el lock, por
+        el mismo motivo que detener(): el hilo de desambiguacion puede
+        estar mutando esos dicts en este instante."""
+        with self._lock:
+            return [dict(p) for p in self.pasos]
 
     @property
     def ventanas_revinculadas(self) -> int:
@@ -449,7 +553,7 @@ class GrabadoraEscritorio:
                     {"tipo": "click_coordenada", "x": x_rel, "y": y_rel, "control_tipo": tipo_control}
                 )
 
-        self._ultimo_click_editable = tipo_control in _TIPOS_EDITABLES
+        self._ultimo_click_editable = _es_editable(tipo_control)
         self._ultimo_click_es_password = es_password
 
         # La desambiguacion (cientos de ms de consultas UIA) se delega al
@@ -559,11 +663,8 @@ class GrabadoraEscritorio:
             return
 
         # el foco de teclado tambien se restringe a la ventana objetivo
-        try:
-            hwnd_activo = win32gui.GetForegroundWindow()
-        except Exception:
-            return
-        if hwnd_activo != self._hwnd_objetivo:
+        if not self._foco_es_de_la_ventana_objetivo():
+            self._teclas_ignoradas += 1
             return
 
         from pynput.keyboard import Key
@@ -573,14 +674,32 @@ class GrabadoraEscritorio:
             # un login, lanzar el resultado seleccionado en el buscador de
             # Windows) -- sin esto, se grababa el texto tecleado pero nunca
             # el Enter que lo confirma, y el flujo grabado quedaba
-            # incompleto en tiempo de reproduccion. Tab solo sigue siendo
-            # un delimitador de campo (mover el foco ya queda implicito en
-            # los siguientes clicks/tecleo).
+            # incompleto en tiempo de reproduccion.
+            #
+            # Tab emite su PROPIO paso por dos razones distintas, ambas
+            # reales: (1) al reproducir hay que mover el foco de verdad --
+            # antes no se emitia nada y el texto del segundo campo se
+            # tecleaba sobre el primero; (2) sin un paso en medio, los dos
+            # "escribir" quedaban ADYACENTES y _depurar_pasos los colapsaba,
+            # perdiendo por completo lo tecleado en el primer campo (llenar
+            # un login con Tab solo conservaba el ultimo campo).
             editable_antes_del_flush = self._ultimo_click_editable
             self._flush_texto()
-            if key == Key.enter and editable_antes_del_flush:
-                with self._lock:
+            with self._lock:
+                if key == Key.enter and editable_antes_del_flush:
                     self.pasos.append({"tipo": "tecla_enter"})
+                elif key == Key.tab:
+                    self.pasos.append({"tipo": "tecla_tab"})
+            if key == Key.tab:
+                # el foco se movio con el teclado, no con un click: el
+                # control nuevo es desconocido, pero suponerlo NO editable
+                # volveria a tirar todo lo que se teclee despues (ese es
+                # justo el flujo normal de un formulario). Se conserva
+                # "editable" y se limpia la marca de password, que es la
+                # unica bandera cuyo error tendria consecuencias de
+                # seguridad si se arrastrara.
+                self._ultimo_click_editable = True
+                self._ultimo_click_es_password = False
             return
 
         codigo_navegacion = _NOMBRES_TECLAS_NAVEGACION.get(getattr(key, "name", None))
@@ -590,8 +709,26 @@ class GrabadoraEscritorio:
                 self.pasos.append({"tipo": "tecla_navegacion", "tecla": codigo_navegacion})
             return
 
-        caracter = getattr(key, "char", None)
+        if key == Key.backspace:
+            # borra dentro de lo que se lleva tecleado en ESTA grabacion.
+            # Si el buffer ya esta vacio se ignora: se estaria borrando
+            # texto que el campo ya traia, y eso no se puede representar
+            # como un paso "escribir" sin inventar contenido.
+            with self._lock:
+                self._buffer_texto = self._buffer_texto[:-1]
+            return
+
+        # La barra espaciadora NO llega como caracter: en Windows pynput
+        # resuelve el codigo virtual antes de traducirlo, y VK_SPACE esta
+        # en su tabla de teclas especiales -- getattr(Key.space, "char")
+        # es None. Sin este caso, todo texto con espacios se grababa
+        # pegado ("Rep dia" -> "Repdia"), en cada grabacion.
+        caracter = " " if key == Key.space else getattr(key, "char", None)
         if not caracter or not self._ultimo_click_editable:
+            return
+        if not caracter.isprintable():
+            # Ctrl+C y compañia llegan como caracteres de control ('\x03').
+            # No son texto que nadie quiso escribir y ensuciarian el .py.
             return
 
         if self._ultimo_click_es_password:
@@ -614,6 +751,32 @@ class GrabadoraEscritorio:
             if self._buffer_texto:
                 self.pasos.append({"tipo": "escribir", "valor": self._buffer_texto})
                 self._buffer_texto = ""
+
+    def _foco_es_de_la_ventana_objetivo(self) -> bool:
+        """La ventana con el foco de teclado, ¿es la que se esta grabando?
+
+        No basta comparar contra _hwnd_objetivo tal cual: ese handle sale
+        de GetAncestor(WindowFromPoint(...), GA_ROOT) -- la raiz de lo que
+        estaba BAJO EL CURSOR -- mientras GetForegroundWindow devuelve la
+        ventana ACTIVA. Divergen en casos normales (un menu desplegable es
+        su propia ventana raiz, un dialogo con dueño, una app con varias
+        ventanas de nivel superior), y cuando divergian se descartaba todo
+        el tecleo sin dejar rastro. Se acepta tambien cuando ambas
+        comparten el mismo ROOT OWNER, que es lo que hace equivalentes a
+        una ventana y sus popups/dialogos propios sin abrir la puerta a
+        una aplicacion ajena."""
+        try:
+            hwnd_activo = win32gui.GetForegroundWindow()
+        except Exception:
+            return False
+        if hwnd_activo == self._hwnd_objetivo:
+            return True
+        try:
+            dueño_activo = win32gui.GetAncestor(hwnd_activo, win32con.GA_ROOTOWNER)
+            dueño_objetivo = win32gui.GetAncestor(self._hwnd_objetivo, win32con.GA_ROOTOWNER)
+        except Exception:
+            return False
+        return bool(dueño_activo) and dueño_activo == dueño_objetivo
 
     @staticmethod
     def _es_ventana_propia(hwnd: int) -> bool:
@@ -724,10 +887,14 @@ def _depurar_pasos(pasos: list[dict]) -> list[dict]:
                 continue
             limpios.append(paso)
         elif paso["tipo"] == "escribir":
-            if limpios and limpios[-1]["tipo"] == "escribir":
-                limpios[-1] = paso
-            else:
-                limpios.append(paso)
+            # Sin colapsar. La Grabadora web SI colapsa escrituras
+            # consecutivas, pero alla la comparacion es POR SELECTOR --
+            # mismo campo. Aqui no hay ninguna clave de campo, y colapsar
+            # a ciegas juntaba campos DISTINTOS: llenar un login con Tab
+            # dejaba solo el ultimo campo y el usuario perdia lo demas sin
+            # ningun aviso. Ademas ya no hace falta: esta grabadora emite
+            # un solo "escribir" por flush (no una por tecla).
+            limpios.append(paso)
         elif paso["tipo"] == "escribir_credencial":
             if not (limpios and limpios[-1]["tipo"] == "escribir_credencial"):
                 limpios.append(paso)
@@ -744,8 +911,17 @@ def _depurar_pasos(pasos: list[dict]) -> list[dict]:
                 limpios[-1] = {**limpios[-1], "veces": limpios[-1].get("veces", 1) + 1}
             else:
                 limpios.append(paso)
+        elif paso["tipo"] == "tecla_tab":
+            # Un Tab al final (o dos seguidos sin nada tecleado en medio)
+            # no aporta nada al reproducir y solo mueve el foco a ciegas.
+            if limpios and limpios[-1]["tipo"] == "tecla_tab":
+                continue
+            limpios.append(paso)
         elif paso["tipo"] in ("click", "click_coordenada", "click_password", "tecla_enter"):
             limpios.append(paso)
+    # un Tab final solo mueve el foco a un control que ya no se usa
+    while limpios and limpios[-1]["tipo"] == "tecla_tab":
+        limpios.pop()
     return limpios
 
 
@@ -827,6 +1003,10 @@ def generar_codigo_escritorio(nombre_automatizacion: str, pasos: list[dict]) -> 
             lineas_cuerpo.append(f"        self.escritorio.click_en({paso['x']!r}, {paso['y']!r}){comentario}")
         elif paso["tipo"] == "tecla_enter":
             lineas_cuerpo.append('        self.escritorio.atajo("{ENTER}")')
+        elif paso["tipo"] == "tecla_tab":
+            # mueve el foco de verdad al reproducir: sin esta linea, el
+            # texto del campo siguiente se tecleaba sobre el anterior.
+            lineas_cuerpo.append('        self.escritorio.atajo("{TAB}")')
         elif paso["tipo"] == "tecla_navegacion":
             veces = paso.get("veces", 1)
             # tecla ya viene de _NOMBRES_TECLAS_NAVEGACION (valores fijos
