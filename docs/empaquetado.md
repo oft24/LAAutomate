@@ -1,6 +1,6 @@
 # Empaquetado e instalación
 
-La app se distribuye como una carpeta con `LAAutomate.exe` dentro, generada por
+La app se distribuye como una carpeta con `LaAutomate.exe` dentro, generada por
 PyInstaller, más dos `.bat` que instalan y desinstalan.
 
 ## Generar el paquete
@@ -11,12 +11,12 @@ empaquetar.bat
 
 Hace tres cosas:
 
-1. `PyInstaller LAAutomate.spec --noconfirm` → genera `dist/LAAutomate/`.
+1. `PyInstaller LaAutomate.spec --noconfirm` → genera `dist/LaAutomate/`.
 2. Copia al lado del `.exe` lo que PyInstaller no incluye: `README.md`, `.env.example`,
    la carpeta `automations/` y los dos `.bat` del instalador.
 3. Te dice qué correr para instalar.
 
-El paso 2 existe porque **PyInstaller borra `dist/LAAutomate/` en cada build**. Por eso
+El paso 2 existe porque **PyInstaller borra `dist/LaAutomate/` en cada build**. Por eso
 los `.bat` viven versionados en `instalador/` y se copian al final, en vez de crearse a
 mano en cada rebuild.
 
@@ -26,10 +26,10 @@ proyecto creado e instalado (ver [desarrollo](desarrollo.md)), con `pyinstaller`
 ## Instalar
 
 ```bash
-dist\LAAutomate\INSTALL.bat
+dist\LaAutomate\INSTALL.bat
 ```
 
-- Instala en **`%LOCALAPPDATA%\LAAutomate`**, no en el escritorio: son ~220 MB de
+- Instala en **`%LOCALAPPDATA%\LaAutomate`**, no en el escritorio: son ~220 MB de
   binarios, y meterlos en una carpeta sincronizada con OneDrive la sincronizaría
   eternamente y puede bloquear archivos en pleno uso.
 - Deja un **acceso directo en el escritorio**, que es lo que el usuario abre.
@@ -46,7 +46,7 @@ dist\LAAutomate\INSTALL.bat
 ## Desinstalar
 
 ```bash
-%LOCALAPPDATA%\LAAutomate\UNINSTALL.bat
+%LOCALAPPDATA%\LaAutomate\UNINSTALL.bat
 ```
 
 Pide confirmación escribiendo `SI`, ofrece copiar tus automatizaciones al escritorio
@@ -75,7 +75,7 @@ puedas editar una automatización desde la app instalada y que funcione.
 
 ## El `.spec`
 
-`LAAutomate.spec` incluye a mano lo que PyInstaller no detecta solo:
+`LaAutomate.spec` incluye a mano lo que PyInstaller no detecta solo:
 
 - `collect_all` de **keyring** (backends que se cargan dinámicamente), **selenium** y
   **pynput** (el listener global de F5 de la grabadora).

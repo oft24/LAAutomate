@@ -102,7 +102,7 @@ class _EmisorHotkeyF5(QObject):
 class _ListenerHotkeyF5(QThread):
     """Escucha F5 globalmente (sin importar que ventana tenga el foco)
     mientras el modo Escritorio esté abierto -- permite iniciar/detener
-    la grabación aunque LAAutomate no sea la ventana activa (la
+    la grabación aunque LaAutomate no sea la ventana activa (la
     grabadora en sí ya requiere eso: casi siempre se está grabando OTRA
     app, no esta)."""
 
@@ -472,6 +472,19 @@ class RecorderView(QWidget):
             self.estado.setText(
                 f"Grabando… ({ignorados} click(s) ignorados por caer en otra ventana que sigue "
                 "abierta — si fue un click tuyo por accidente, ignóralo)"
+            )
+            self.estado.setStyleSheet(f"color: {COLORES.ocre}; font-weight: 600;")
+            return
+
+        # El tecleo descartado va al final porque es el aviso menos grave,
+        # pero tiene que estar: mientras fue un descarte mudo, el usuario
+        # terminaba una grabación entera creyendo que "la grabadora no
+        # escribe" sin ninguna pista de que su tecleo caía en otra ventana.
+        teclas = self._grabadora.teclas_ignoradas
+        if teclas:
+            self.estado.setText(
+                f"Grabando… ({teclas} tecla(s) ignoradas por escribirse en otra ventana — "
+                "haz click dentro de la ventana que estás grabando antes de teclear)"
             )
             self.estado.setStyleSheet(f"color: {COLORES.ocre}; font-weight: 600;")
 

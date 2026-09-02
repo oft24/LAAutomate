@@ -87,13 +87,51 @@ _SCRIPT_GRABADOR = r"""
         });
     }, true);
 
-    document.addEventListener('change', function(ev) {
+    // Tipos de <input> donde "el valor" no es texto tecleado sino un
+    // estado (marcado/sin marcar, un archivo elegido, un color). Convertir
+    // eso en self.web.escribir() produce codigo que no reproduce nada.
+    var TIPOS_SIN_TEXTO = {
+        checkbox: 1, radio: 1, file: 1, submit: 1, button: 1,
+        image: 1, reset: 1, range: 1, color: 1
+    };
+
+    function esCampoDeTexto(el) {
+        if (!el) return false;
+        if (el.tagName === 'TEXTAREA') return true;
+        if (el.tagName !== 'INPUT') return false;
+        var tipo = (el.type || 'text').toLowerCase();
+        return tipo !== 'password' && !TIPOS_SIN_TEXTO[tipo];
+    }
+
+    // Una escritura SUSTITUYE a la anterior sobre el mismo campo en vez de
+    // encolarse: 'input' emite un evento por tecla y cada uno trae el valor
+    // COMPLETO del campo, asi que guardarlos todos solo haria crecer el
+    // JSON de localStorage (que se lee y reescribe entero en cada tecla)
+    // para terminar quedandose igual con el ultimo.
+    function guardarEscritura(evento) {
+        var eventos = leerEventos();
+        var ultimo = eventos[eventos.length - 1];
+        if (ultimo && ultimo.tipo === 'escribir' && ultimo.selector === evento.selector) {
+            eventos[eventos.length - 1] = evento;
+        } else {
+            eventos.push(evento);
+        }
+        localStorage.setItem('__rpaEventos', JSON.stringify(eventos));
+    }
+
+    // 'input' y no 'change': 'change' solo se emite cuando el campo CONFIRMA
+    // su valor, que en un campo de texto significa al perder el foco. Quien
+    // escribia y se iba directo a LaAutomate a presionar "Detener" nunca
+    // sacaba el foco del campo dentro de la pagina, el evento no se emitia
+    // nunca y el paso 'escribir' simplemente no existia -- el vaciado final
+    // no puede recuperar un evento que el navegador jamas emitio. Era la
+    // causa de que la grabadora web pareciera "no capturar lo que escribo".
+    document.addEventListener('input', function(ev) {
         var el = ev.target;
-        if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return;
-        if (el.type === 'password') return;  // nunca capturar contraseñas
+        if (!esCampoDeTexto(el)) return;
         var sel = selectorDe(el);
         if (!sel) return;
-        guardarEvento({ tipo: 'escribir', selector: sel, valor: el.value });
+        guardarEscritura({ tipo: 'escribir', selector: sel, valor: el.value });
     }, true);
 })();
 """
@@ -210,11 +248,56 @@ class GrabadoraWeb:
         except Exception as exc:
             self.logger.debug("No se pudo inyectar en la página actual: %s", exc)
 
+    def _seguir_pestana_nueva(self, driver, handles_conocidos: set[str]) -> str | None:
+        """Si apareció una pestaña que no existía, cambia a ella y devuelve
+        su handle. Devuelve None si no hay ninguna nueva.
+
+        Sin esto la grabación se rompía en silencio en cuanto un click abría
+        una pestaña: el navegador se la muestra al usuario, que sigue
+        trabajando ahí, pero el driver se queda apuntando a la pestaña vieja
+        -- el sondeo seguía leyendo el localStorage de una página que ya
+        nadie estaba tocando, así que ni el script se inyectaba en la
+        pestaña nueva ni se capturaba un solo paso de todo lo que el usuario
+        hiciera en ella. El resultado era una grabación que se cortaba justo
+        donde el usuario creía que empezaba lo interesante.
+
+        Cambiar el foco del driver aquí NO le estorba al usuario: la pestaña
+        a la que se cambia es la que el navegador acaba de poner al frente
+        por su cuenta, así que el driver solo se está poniendo al día.
+        """
+        nuevos = [h for h in driver.window_handles if h not in handles_conocidos]
+        if not nuevos:
+            return None
+        handle = nuevos[-1]
+        driver.switch_to.window(handle)
+        return handle
+
     def _sondear(self) -> None:
-        url_anterior = self.web.driver.current_url
+        driver_inicial = self.web.driver
+        url_anterior = driver_inicial.current_url
+        handles_conocidos = set(driver_inicial.window_handles)
         while self._grabando:
             try:
                 driver = self.web.driver
+
+                # Antes de leer nada: si el usuario abrió una pestaña, hay
+                # que seguirlo ahí o todo lo que haga se pierde.
+                if self._seguir_pestana_nueva(driver, handles_conocidos) is not None:
+                    self._inyectar_en_pagina_actual()
+                    # title/current_url se leen ANTES de tomar el lock: son
+                    # viajes al navegador y el lock lo comparte el hilo que
+                    # entrega los pasos en detener().
+                    titulo, url_nueva = driver.title, driver.current_url
+                    with self._lock:
+                        self.pasos.append(
+                            {"tipo": "cambiar_pestana", "titulo": titulo, "url": url_nueva}
+                        )
+                    url_anterior = url_nueva
+                    self.url_actual = url_nueva
+                # se recalcula SIEMPRE (no solo al abrirse una): así una
+                # pestaña cerrada sale del conjunto y, si el usuario vuelve
+                # a abrir otra, se detecta como nueva igual.
+                handles_conocidos = set(driver.window_handles)
 
                 # Leer los eventos ANTES de revisar si la URL cambio: un click
                 # que causo una navegacion rapida quedo grabado en localStorage
@@ -269,6 +352,15 @@ def _depurar_pasos(pasos: list[dict]) -> list[dict]:
                 limpios[-1] = paso  # se quedo el valor final tecleado, no cada tecla
             else:
                 limpios.append(paso)
+        elif paso["tipo"] == "cambiar_pestana":
+            # dos cambios seguidos a la MISMA url son ruido del sondeo
+            if (
+                limpios
+                and limpios[-1]["tipo"] == "cambiar_pestana"
+                and limpios[-1].get("url") == paso.get("url")
+            ):
+                continue
+            limpios.append(paso)
         elif paso["tipo"] == "click":
             limpios.append(paso)
     return limpios
@@ -290,6 +382,15 @@ def generar_codigo(nombre_automatizacion: str, pasos: list[dict]) -> str:
             texto = _texto_seguro_para_comentario(paso["texto"]) if paso.get("texto") else ""
             comentario = f"  # {texto}" if texto else ""
             lineas_cuerpo.append(f"        self.web.click({paso['selector']!r}){comentario}")
+        elif paso["tipo"] == "cambiar_pestana":
+            # El click de la línea anterior abrió una pestaña. Se genera
+            # cambiar_a_pestana_nueva() y no cambiar_a_pestana(indice): al
+            # reproducir, el índice depende de cuántas pestañas hubiera
+            # abiertas, que no es lo mismo que al grabar -- esperar "la que
+            # no existía antes" sí se comporta igual en ambos momentos.
+            titulo = _texto_seguro_para_comentario(paso.get("titulo") or "")
+            comentario = f"  # {titulo}" if titulo else ""
+            lineas_cuerpo.append(f"        self.web.cambiar_a_pestana_nueva(){comentario}")
         elif paso["tipo"] == "escribir":
             lineas_cuerpo.append(f"        self.web.escribir({paso['selector']!r}, {paso['valor']!r})")
 

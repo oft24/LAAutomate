@@ -1,4 +1,4 @@
-# LAAutomate
+# LaAutomate
 
 Plataforma de escritorio para escribir automatizaciones (RPA) **100 % en código** y
 operarlas como si fueran Power Automate: programador, disparadores, historial de
@@ -25,9 +25,10 @@ Python + PySide6 + Selenium + pywinauto. Windows.
 | | |
 |---|---|
 | **Automatizaciones en Python** | Una carpeta por automatización, una clase que hereda `BaseAutomation` e implementa `ejecutar()`. |
-| **Acciones listas** | Navegador (Selenium), Excel (pandas + COM), HTTP, correo (Outlook COM o SMTP), escritorio (pywinauto), Microsoft 365 Copilot + Teams. |
+| **Acciones listas** | Navegador (Selenium, con control de pestañas), Excel (pandas + COM), HTTP, correo (Outlook COM o SMTP), escritorio (pywinauto), Microsoft 365 Copilot + Teams. |
+| **Varias pestañas y varias apps** | Una automatización puede saltar entre pestañas del navegador y entre ventanas de aplicaciones distintas dentro del mismo proceso. |
 | **Disparadores** | Manual, cron, carpeta vigilada, webhook HTTP local, buzón IMAP. |
-| **Grabadora** | Graba clicks y teclas —en el navegador o en apps de escritorio— y genera el código Python de la automatización. Nunca graba contraseñas. |
+| **Grabadora** | Graba clicks y teclas —en el navegador o en apps de escritorio— y genera el código Python de la automatización. Sigue las pestañas que se abren y, si se le pide, varias ventanas. Nunca graba contraseñas. |
 | **Historial** | Cada corrida queda en SQLite: éxito/fallo, mensaje, duración. Visible en el panel principal. |
 | **Bóveda de credenciales** | Usuarios y contraseñas en el Almacén de credenciales de Windows vía `keyring`, nunca en el código ni en la base de datos. |
 | **App de escritorio** | PySide6, 7 vistas: Panel principal, Automatizaciones, Grabadora, Programador, Registros, Bóveda y Wiki. |
@@ -86,9 +87,13 @@ registra el fallo en el historial.
 
 ## Documentación
 
+Empieza por el **[índice de `docs/`](docs/README.md)**, que dice qué leer según lo
+que quieras hacer. Los documentos, uno por uno:
+
 | Documento | Para qué |
 |---|---|
 | [Arquitectura](docs/arquitectura.md) | Cómo encajan registry, runner, scheduler, acciones y core. Dónde vive cada dato. |
+| [Lógica de la Grabadora](docs/logica-grabadora.md) | Flujo Web/Escritorio, estados, diagnóstico de escritura y criterios de corrección. |
 | [Escribir automatizaciones](docs/escribir-automatizaciones.md) | La clase base, los disparadores, credenciales, la grabadora, errores comunes. |
 | [Referencia de acciones](docs/acciones.md) | Todos los métodos de `self.web`, `.excel`, `.http`, `.correo`, `.escritorio`, `.copiloto`. |
 | [Empaquetado e instalación](docs/empaquetado.md) | Generar el `.exe`, el instalador y cómo cambian las rutas al empaquetar. |
@@ -104,7 +109,7 @@ automations/  tus automatizaciones — una carpeta por cada una
 core/         config, logging, historial (SQLite), bóveda de credenciales, alertas
 instalador/   INSTALL.bat / UNINSTALL.bat que se copian al paquete distribuible
 tests/        pruebas con pytest (sin tocar el escritorio real: todo mockeado)
-docs/         esta documentación
+docs/         esta documentación (empieza por docs/README.md)
 ```
 
 ## Licencia

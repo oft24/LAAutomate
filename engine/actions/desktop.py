@@ -3,11 +3,113 @@ pyautogui) -- abre o conecta con la ventana de una app real y la controla
 como lo haria una persona, sin pasar por ninguna API/COM de esa app."""
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes as wintypes
+import re
 import subprocess
 import time
 from pathlib import Path
 
+import win32con
+import win32gui
+
+# DWMWA_CLOAKED: Windows "encoge" (cloak) las ventanas de las apps UWP
+# suspendidas en segundo plano. La ventana sigue existiendo y hasta
+# IsWindowVisible() devuelve 1, pero UI Automation deja de enumerarla por
+# completo -- Desktop(backend="uia").windows() devuelve una lista vacia y
+# cualquier connect() se queda esperando hasta el timeout. Se comprobo con
+# la Calculadora de Windows abierta y en segundo plano: cloaked=2
+# (DWM_CLOAKED_SHELL) y connect(title_re="^Calculadora$") fallaba con
+# TimeoutError pese a que la app estaba ahi. La unica salida es
+# restaurarla primero; ver _despertar_ventana.
+_DWMWA_CLOAKED = 14
+
 SCREENSHOTS_DIR = Path("logs/screenshots")
+
+# type_keys() de pywinauto no recibe texto literal, recibe un MINI-LENGUAJE:
+# {} delimita teclas especiales, ^ + % son Ctrl/Shift/Alt, ~ es Enter y ()
+# agrupa. Escribir un mensaje normal sin escapar esto lo destruye en
+# silencio: se comprobo mandando
+#   "prueba (LaAutomate) 100% ~ok~ +1 ^arriba^"
+# a la caja de mensajes de Discord y lo que quedo escrito fue "rriba" --
+# los parentesis se comieron su contenido, % y ^ se tomaron como
+# modificadores y ~ como un Enter. Por eso escribir() escapa SIEMPRE.
+_ESCAPES_TYPE_KEYS = {
+    "{": "{{}",
+    "}": "{}}",
+    "^": "{^}",
+    "+": "{+}",
+    "%": "{%}",
+    "~": "{~}",
+    "(": "{(}",
+    ")": "{)}",
+}
+
+
+def escapar_para_type_keys(texto: str) -> str:
+    """Convierte texto literal en algo que type_keys() escribe tal cual."""
+    return "".join(_ESCAPES_TYPE_KEYS.get(caracter, caracter) for caracter in texto)
+
+
+def _esta_dormida(hwnd: int) -> bool:
+    """True si la ventana esta minimizada o 'cloaked' por el shell."""
+    try:
+        estilo = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+        if estilo & win32con.WS_MINIMIZE:
+            return True
+        oculta = ctypes.c_int(0)
+        ctypes.windll.dwmapi.DwmGetWindowAttribute(
+            wintypes.HWND(hwnd), _DWMWA_CLOAKED, ctypes.byref(oculta), ctypes.sizeof(oculta)
+        )
+        return bool(oculta.value)
+    except Exception:
+        return False
+
+
+def _despertar_ventana(titulo_regex: str | None = None, clase: str | None = None) -> int | None:
+    """Restaura una ventana que UI Automation no puede ver y devuelve su HWND.
+
+    La busqueda se hace con EnumWindows de Win32, que SI ve las ventanas
+    minimizadas y cloaked que UIA esconde. Si la encuentra dormida, la
+    restaura y la trae al frente para que UIA vuelva a enumerarla.
+
+    Devuelve None si no hay ninguna ventana que haga match -- ahi el
+    problema no es que este dormida, es que la app no esta abierta.
+    """
+    candidatas: list[int] = []
+
+    def _revisar(hwnd, _):
+        try:
+            if titulo_regex is not None:
+                if not re.match(titulo_regex, win32gui.GetWindowText(hwnd) or ""):
+                    return True
+            if clase is not None and win32gui.GetClassName(hwnd) != clase:
+                return True
+            if titulo_regex is None and clase is None:
+                return True
+            candidatas.append(hwnd)
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(_revisar, None)
+    except Exception:
+        return None
+    if not candidatas:
+        return None
+
+    # se prefiere una que este dormida: es la que hay que despertar
+    hwnd = next((h for h in candidatas if _esta_dormida(h)), candidatas[0])
+    try:
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        # SetForegroundWindow falla si otro proceso tiene el bloqueo de
+        # primer plano; el SW_RESTORE ya suele bastar para descloakear.
+        pass
+    time.sleep(0.6)
+    return hwnd
 
 
 class DesktopActions:
@@ -39,7 +141,22 @@ class DesktopActions:
         abierta cuando se grabo, sin necesitar el comando de lanzamiento."""
         from pywinauto import Application
 
-        self._app = Application(backend="uia").connect(title_re=titulo_regex, timeout=tiempo_espera)
+        try:
+            self._app = Application(backend="uia").connect(
+                title_re=titulo_regex, timeout=tiempo_espera
+            )
+        except Exception:
+            # Segundo intento tras despertar la ventana: una app UWP
+            # suspendida (o cualquier ventana minimizada) es invisible para
+            # UI Automation aunque exista -- ver el comentario de
+            # _DWMWA_CLOAKED. Sin esto, automatizar una app que el usuario
+            # dejo en segundo plano fallaba con un TimeoutError sin pistas.
+            if _despertar_ventana(titulo_regex=titulo_regex) is None:
+                raise
+            self.logger.info("Ventana %s estaba dormida -- restaurada", titulo_regex)
+            self._app = Application(backend="uia").connect(
+                title_re=titulo_regex, timeout=tiempo_espera
+            )
         self._ventana = self._app.window(title_re=titulo_regex)
         self._ventana.set_focus()
         self.logger.info("Conectado a ventana existente (%s)", titulo_regex)
@@ -52,7 +169,13 @@ class DesktopActions:
         no tiene con que hacer match."""
         from pywinauto import Application
 
-        self._app = Application(backend="uia").connect(class_name=clase, timeout=tiempo_espera)
+        try:
+            self._app = Application(backend="uia").connect(class_name=clase, timeout=tiempo_espera)
+        except Exception:
+            if _despertar_ventana(clase=clase) is None:
+                raise
+            self.logger.info("Ventana de clase %s estaba dormida -- restaurada", clase)
+            self._app = Application(backend="uia").connect(class_name=clase, timeout=tiempo_espera)
         self._ventana = self._app.window(class_name=clase)
         self._ventana.set_focus()
         self.logger.info("Conectado a ventana existente por clase (%s)", clase)
@@ -74,7 +197,9 @@ class DesktopActions:
                 "-- guarda las credenciales de esta automatización en la Bóveda de credenciales."
             )
         self._requiere_ventana()
-        self._ventana.type_keys(texto, with_spaces=True, pause=0.02)
+        self._ventana.type_keys(
+            escapar_para_type_keys(texto), with_spaces=True, with_newlines=True, pause=0.02
+        )
 
     def esperar(self, segundos: float) -> None:
         time.sleep(segundos)
@@ -138,6 +263,33 @@ class DesktopActions:
         criterios: dict = {"title": texto}
         if control_type:
             criterios["control_type"] = control_type
+        if found_index is not None:
+            criterios["found_index"] = found_index
+        control = self._resolver_control(**criterios)
+        control.click_input(button_down=True, button_up=False)
+        time.sleep(pausa)
+        control.click_input(button_down=False, button_up=True)
+
+    def click_por_tipo(
+        self, control_type: str, found_index: int | None = None, pausa: float = 0.08
+    ) -> None:
+        """Click en un control por su TIPO, sin mirar su texto.
+
+        Existe para los controles donde el "texto visible" no es una
+        etiqueta sino el CONTENIDO: en un campo de texto, window_text()
+        devuelve lo que hay escrito dentro. Usarlo como localizador da un
+        codigo que solo funciona mientras el campo tenga exactamente ese
+        valor -- y deja de funcionar en cuanto esta vacio o dice otra cosa.
+
+        Caso real: la caja de mensajes de Discord es un unico Edit cuyo
+        window_text() es su propio contenido ('\\ufeff\\n' vacia). La
+        grabacion guardaba ese valor como localizador y al reproducir
+        reventaba con ElementNotFoundError. Por tipo se resuelve sola,
+        porque en esa ventana hay exactamente un Edit.
+
+        `found_index` (0, 1, 2...) elige cual usar si hay varios del mismo
+        tipo."""
+        criterios: dict = {"control_type": control_type}
         if found_index is not None:
             criterios["found_index"] = found_index
         control = self._resolver_control(**criterios)

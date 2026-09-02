@@ -19,7 +19,7 @@ load_dotenv(BASE_DIR / ".env")
 
 # El nombre de la app vive aqui y no repetido por la UI: renombrarla es
 # cambiar esta linea (titulo de ventana, marca de la sidebar, etc.).
-NOMBRE_APP = "LAAutomate"
+NOMBRE_APP = "LaAutomate"
 DESCRIPCION_APP = "RPA de código"
 MARCA_CORTA = "LA"  # sidebar colapsada
 

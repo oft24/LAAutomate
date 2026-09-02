@@ -1,6 +1,6 @@
 # Arquitectura
 
-LAAutomate tiene tres capas que casi no se conocen entre sí:
+LaAutomate tiene tres capas que casi no se conocen entre sí:
 
 - **`engine/`** — el motor. No sabe que existe una interfaz gráfica.
 - **`core/`** — servicios transversales: configuración, logs, historial, credenciales.

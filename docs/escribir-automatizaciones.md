@@ -113,13 +113,31 @@ La vista **Grabadora** graba lo que haces y genera el `automation.py` correspond
 Dos modos:
 
 **Web** — abre un Chrome instrumentado, graba tus clicks y escrituras como selectores
-CSS, y genera llamadas a `self.web`.
+CSS, y genera llamadas a `self.web`. Si un click abre una **pestaña nueva**, la
+grabadora te sigue a ella y agrega el `cambiar_a_pestana_nueva()` correspondiente.
 
 **Escritorio** — graba clicks y teclas sobre cualquier app de Windows usando UI
 Automation, y genera llamadas a `self.escritorio`. Identifica los controles por su
 texto visible cuando lo tienen, y cae a coordenadas cuando no. Como casi siempre estás
 grabando *otra* aplicación, **F5 inicia y detiene la grabación desde cualquier
 ventana**.
+
+### Grabar un proceso que toca varias aplicaciones
+
+Por defecto la grabadora se queda con **una sola ventana**: la del primer click.
+Todo lo que hagas en otra se ignora. Es a propósito — evita que un click mal
+calculado capture contenido de una aplicación que no tiene nada que ver.
+
+Para grabar un flujo que salta entre apps, marca **"Cualquier ventana (sin
+candado)"** antes de iniciar. Entonces cada cambio de ventana genera una conexión
+nueva en el código. Dos cosas que conviene saber:
+
+- **Haz un click dentro de cada ventana nueva antes de teclear.** La ventana
+  objetivo se mueve con los clicks; cambiar de app con Alt+Tab y ponerte a
+  escribir deja ese texto fuera de la grabación. La vista te avisa en vivo si
+  está descartando teclas por esto.
+- Los diálogos de la propia app ("Guardar como", "Buscar") **sí** cuentan como la
+  misma ventana: no necesitas el modo sin candado para ellos.
 
 Dos cosas que la grabadora hace a propósito:
 
@@ -133,6 +151,9 @@ Dos cosas que la grabadora hace a propósito:
 El código generado es un punto de partida, no un producto terminado: los controles se
 identifican por texto visible, así que un cambio de versión o de idioma de la app
 objetivo puede romperlo. Revísalo siempre.
+
+La secuencia completa de eventos, los estados de la UI y las limitaciones conocidas
+están documentados en [Lógica de la Grabadora](logica-grabadora.md).
 
 ## Probar
 

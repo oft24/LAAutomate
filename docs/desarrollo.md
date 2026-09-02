@@ -28,14 +28,25 @@ python manage.py ejecutar mi_automatizacion
 ## Pruebas
 
 ```bash
-pytest -q                     # todo
-pytest -m "not network"       # sin las que navegan a un sitio real
+pytest -q                            # todo
+pytest -m "not network"              # sin las que navegan a un sitio real
+pytest -m "not network and not navegador"   # sin navegador de ningún tipo
 pytest tests/test_runner_failure.py -v
 ```
 
-~100 pruebas, todas con el escritorio y el navegador **mockeados**: la suite no abre
-ventanas, no mueve el mouse y no toca Outlook. Las que necesitan internet están
-marcadas con `@pytest.mark.network` (declarado en `pytest.ini`).
+~140 pruebas. Casi todas corren con el escritorio y el navegador **mockeados**: no
+abren ventanas, no mueven el mouse y no tocan Outlook. Dos marcadores acotan las
+que sí necesitan algo del entorno (ambos declarados en `pytest.ini`):
+
+| Marcador | Necesita | Por qué no se puede mockear |
+|---|---|---|
+| `network` | Internet y un navegador | Valida el pipeline completo contra un sitio real. |
+| `navegador` | Un navegador, **no** internet | Valida el JavaScript de la Grabadora web: qué evento emite el navegador y cuándo. Sirve su propia página desde `localhost`. Un doble solo confirmaría lo que el doble finge. |
+
+> **Si `tmp_path` falla con `PermissionError`** sobre
+> `%LOCALAPPDATA%\Temp\pytest-of-<usuario>`: es una carpeta que quedó de una
+> corrida anterior con permisos rotos, no un fallo del proyecto. Bórrala, o corre
+> con `pytest --basetemp=<carpeta vacía>`.
 
 Dónde está cubierto qué:
 
@@ -46,7 +57,9 @@ Dónde está cubierto qué:
 | `test_scheduler.py` | Traducción de disparadores a jobs de APScheduler. |
 | `test_desktop_actions.py` | Clicks por texto, por coordenada y por imagen. |
 | `test_desktop_recorder.py` | La grabadora de escritorio — el módulo con más casos borde. |
-| `test_recorder.py` | La grabadora web. |
+| `test_recorder.py` | La grabadora web (lógica pura, sin navegador). |
+| `test_grabadora_web_navegador.py` | La captura de texto de la grabadora web contra un navegador real. Marcado `navegador`. |
+| `test_pestanas.py` | Control de pestañas del navegador y que la grabadora siga las que se abren. |
 | `test_copilot_teams.py` | Lectura y copiado de tablas de Copilot, envío en Teams. |
 | `test_vault.py` | Bóveda de credenciales sobre `keyring`. |
 | `test_workers.py` | El hilo Qt y la cancelación. |
@@ -105,3 +118,9 @@ docs/                   esta documentación
 - Los disparadores `webhook` y `correo` se declaran en el decorador pero hay que
   conectarlos a mano en `engine/triggers/`.
 - No hay reintentos automáticos: un fallo se registra y ahí queda.
+- `_control_en()` de la grabadora de escritorio corre dentro del hook de bajo nivel
+  de pynput y puede superar el `LowLevelHooksTimeout` (300 ms), lo que retira el
+  hook y mata la grabación en silencio.
+- La grabadora web sigue las pestañas **nuevas**, pero no detecta que el usuario
+  vuelva a una que ya estaba abierta. Ver
+  [Lógica de la Grabadora § Limitaciones conocidas](logica-grabadora.md#limitaciones-conocidas).

@@ -14,7 +14,12 @@ import pytest
 
 from pywinauto.findwindows import ElementNotFoundError as _NoEncontrado
 
-from engine.actions.desktop_recorder import GrabadoraEscritorio, _depurar_pasos, generar_codigo_escritorio
+from engine.actions.desktop_recorder import (
+    GrabadoraEscritorio,
+    _depurar_pasos,
+    _foco_de_teclado,
+    generar_codigo_escritorio,
+)
 
 
 class _LoggerFalso:
@@ -172,6 +177,8 @@ def test_grabadora_ignora_tecleo_cuando_el_foco_sale_de_la_ventana_objetivo() ->
 
     with patch("engine.actions.desktop_recorder.win32gui") as win32gui_falso:
         win32gui_falso.GetForegroundWindow.return_value = 222  # otra ventana tiene el foco
+        # ver el comentario de _teclea: GetAncestor debe distinguir 111 de 222
+        win32gui_falso.GetAncestor.side_effect = lambda hwnd, _bandera: hwnd
 
         class _TeclaFalsa:
             char = "x"
@@ -368,7 +375,9 @@ def test_el_callback_no_desambigua_lo_delega_a_otro_hilo() -> None:
 
     # ...pero sí dejó el paso grabado y la bandera de tecleo lista (si se
     # retrasara, el texto tecleado justo despues del click se perdería)
-    assert any(p["tipo"] == "click" for p in grabadora.pasos)
+    # un Edit se graba como click_editable (se localiza por tipo, no por su
+    # contenido -- ver test_grabadora_click_en_campo_de_texto_no_usa_su_valor)
+    assert any(p["tipo"] == "click_editable" for p in grabadora.pasos)
     assert grabadora._ultimo_click_editable is True
     assert grabadora._cola_desambiguacion.qsize() == 1
 
@@ -746,7 +755,7 @@ def test_grabadora_reaplica_el_candado_tras_un_rebind() -> None:
 
 
 def test_click_en_ventana_propia_nunca_fija_la_ventana_objetivo() -> None:
-    """Un click sobre la propia app LAAutomate (mismo PID) nunca debe
+    """Un click sobre la propia app LaAutomate (mismo PID) nunca debe
     convertirse en la ventana objetivo, ni siquiera si es el PRIMER click
     de la grabación."""
     import os
@@ -771,7 +780,7 @@ def test_click_en_ventana_propia_nunca_fija_la_ventana_objetivo() -> None:
 def test_click_en_ventana_propia_no_causa_rebind_ni_se_registra() -> None:
     """Regresion del bug real: la ventana objetivo (111, ej. una sesión
     VNC) se cierra, y el click del usuario para DETENER la grabación cae
-    sobre la propia LAAutomate (222) -- antes esto se trataba como un
+    sobre la propia LaAutomate (222) -- antes esto se trataba como un
     rebind legítimo y quedaba grabado como el último paso (irreproducible,
     porque ese botón está deshabilitado fuera de una grabación). Debe
     ignorarse por completo, sin tocar _hwnd_objetivo ni el contador de
@@ -789,11 +798,11 @@ def test_click_en_ventana_propia_no_causa_rebind_ni_se_registra() -> None:
         w.WindowFromPoint.return_value = 222
         w.GetAncestor.return_value = 222
         w.IsWindow.return_value = False  # 111 ya no existe
-        wp.GetWindowThreadProcessId.return_value = (0, os.getpid())  # 222 = LAAutomate
+        wp.GetWindowThreadProcessId.return_value = (0, os.getpid())  # 222 = LaAutomate
 
         grabadora._al_click(20, 20, None, True)  # click en "Detener y generar código"
 
-    assert grabadora._hwnd_objetivo == 111  # sin cambios -- nunca se reenlazo a LAAutomate
+    assert grabadora._hwnd_objetivo == 111  # sin cambios -- nunca se reenlazo a LaAutomate
     assert grabadora.ventanas_revinculadas == 0
     assert grabadora.pasos == []
 
@@ -805,7 +814,7 @@ def test_click_en_ventana_propia_no_causa_rebind_ni_se_registra() -> None:
         w.IsWindow.return_value = False
         w.GetWindowText.return_value = "Ventana real C"
         w.ScreenToClient.return_value = (5, 5)
-        wp.GetWindowThreadProcessId.return_value = (0, 999999)  # una app real, no LAAutomate
+        wp.GetWindowThreadProcessId.return_value = (0, 999999)  # una app real, no LaAutomate
 
         grabadora._al_click(30, 30, None, True)
 
@@ -1134,6 +1143,8 @@ def test_grabadora_navegacion_ignora_fuera_de_la_ventana_objetivo() -> None:
 
     with patch("engine.actions.desktop_recorder.win32gui") as w:
         w.GetForegroundWindow.return_value = 222  # otra ventana tiene el foco
+        # ver el comentario de _teclea: GetAncestor debe distinguir 111 de 222
+        w.GetAncestor.side_effect = lambda hwnd, _bandera: hwnd
 
         from pynput.keyboard import Key
 
@@ -1233,3 +1244,365 @@ def test_modo_multiple_no_llama_iswindow() -> None:
         grabadora._al_click(50, 50, None, True)
 
     w.IsWindow.assert_not_called()
+
+
+# --------------------------------------------------------------------------
+# Captura de teclado: la grabadora debe detectar lo que el usuario escribe
+# tambien cuando el editor no es un "Edit" clasico de UI Automation y
+# cuando se llega al campo sin hacer click (Tab / campo ya enfocado).
+# --------------------------------------------------------------------------
+
+
+class _TeclaFalsa:
+    def __init__(self, c):
+        self.char = c
+
+
+def _grabadora_lista(**estado):
+    grabadora = GrabadoraEscritorio(_LoggerFalso())
+    grabadora._grabando = True
+    grabadora._hwnd_objetivo = 111
+    for nombre, valor in estado.items():
+        setattr(grabadora, nombre, valor)
+    return grabadora
+
+
+def _teclea(grabadora, texto, *, hwnd=111, clase_foco=None, password_estilo=False):
+    """Simula tecleo real con el foco dentro de la ventana objetivo."""
+    with patch("engine.actions.desktop_recorder.win32gui") as w, patch(
+        "engine.actions.desktop_recorder._foco_de_teclado",
+        return_value=(clase_foco, password_estilo),
+    ):
+        w.GetForegroundWindow.return_value = hwnd
+        # GetAncestor real devuelve el PROPIO hwnd para una ventana de nivel
+        # superior sin owner. Sin esto el MagicMock devolveria el mismo objeto
+        # para dos ventanas distintas y fingiria que son la misma.
+        w.GetAncestor.side_effect = lambda hwnd, _bandera: hwnd
+        for caracter in texto:
+            grabadora._al_tecla(_TeclaFalsa(caracter))
+
+
+def test_grabadora_captura_tecleo_en_editor_tipo_pane() -> None:
+    """Chrome, Electron (Discord/Teams) y los clientes VNC exponen su
+    editor como Pane/Custom, no como Edit. Antes _ultimo_click_editable
+    era False y NO se grababa una sola tecla: el usuario terminaba con una
+    grabacion de clicks sin ningun escribir()."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=False, _ultimo_click_tipo="Pane")
+
+    _teclea(grabadora, "hola")
+
+    assert grabadora._buffer_texto == "hola"
+    grabadora._flush_texto()
+    assert grabadora.pasos == [{"tipo": "escribir", "valor": "hola"}]
+
+
+def test_grabadora_captura_tecleo_sin_click_previo_llegando_con_tab() -> None:
+    """A un campo se llega tambien con Tab, o ya viene enfocado. Sin click
+    no hay nada que clasificar, y antes eso significaba perder todo el
+    tecleo del formulario."""
+    grabadora = _grabadora_lista()  # ningun click clasificado todavia
+
+    _teclea(grabadora, "usuario1", clase_foco="Edit")
+
+    assert grabadora._buffer_texto == "usuario1"
+
+
+def test_grabadora_captura_tecleo_si_el_foco_win32_es_control_de_texto() -> None:
+    """El foco REAL manda sobre la clasificacion del ultimo click: aunque
+    el click se haya clasificado como Button, si el foco de teclado esta
+    en un RichEdit se esta escribiendo texto."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=False, _ultimo_click_tipo="Button")
+
+    _teclea(grabadora, "abc", clase_foco="RichEdit50W")
+
+    assert grabadora._buffer_texto == "abc"
+
+
+def test_grabadora_no_captura_tecleo_sobre_un_boton() -> None:
+    """Sobre un boton/casilla/item de lista una tecla es un atajo (espacio
+    lo presiona, una letra salta al item que empieza por ella), no texto."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=False, _ultimo_click_tipo="Button")
+
+    _teclea(grabadora, "abc")
+
+    assert grabadora._buffer_texto == ""
+    assert grabadora.pasos == []
+
+
+def test_grabadora_backspace_corrige_el_texto_pendiente() -> None:
+    """Escribir, borrar y corregir debe dejar el valor final, no todas las
+    teclas pulsadas."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    _teclea(grabadora, "holaa")
+    with patch("engine.actions.desktop_recorder.win32gui") as w:
+        w.GetForegroundWindow.return_value = 111
+        from pynput.keyboard import Key
+
+        grabadora._al_tecla(Key.backspace)
+
+    assert grabadora._buffer_texto == "hola"
+
+
+def test_grabadora_backspace_sin_texto_pendiente_no_rompe() -> None:
+    """Borrar texto que ya estaba en el campo no se puede modelar; debe
+    ignorarse sin reventar ni dejar el buffer en un estado raro."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    with patch("engine.actions.desktop_recorder.win32gui") as w:
+        w.GetForegroundWindow.return_value = 111
+        from pynput.keyboard import Key
+
+        grabadora._al_tecla(Key.backspace)
+
+    assert grabadora._buffer_texto == ""
+
+
+def test_grabadora_no_graba_atajos_de_teclado_como_texto() -> None:
+    """Ctrl+C llega como caracter de control y Win+R como cmd + 'r'.
+    Ninguno es texto que el usuario quisiera reproducir."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    with patch("engine.actions.desktop_recorder.win32gui") as w, patch(
+        "engine.actions.desktop_recorder._foco_de_teclado", return_value=(None, False)
+    ):
+        w.GetForegroundWindow.return_value = 111
+        from pynput.keyboard import Key
+
+        grabadora._al_tecla(_TeclaFalsa("\x03"))  # Ctrl+C
+        grabadora._al_tecla(Key.cmd)  # se presiona la tecla Windows
+        grabadora._al_tecla(_TeclaFalsa("r"))  # Win+R
+        grabadora._al_soltar_tecla(Key.cmd)
+
+    assert grabadora._buffer_texto == ""
+
+
+def test_grabadora_altgr_escribe_arroba_y_no_se_trata_como_atajo() -> None:
+    """En un teclado español AltGr+2 es "@" y Windows lo reporta como
+    Ctrl+Alt. Descartar todo lo que lleve Ctrl habria hecho imposible
+    grabar el tecleo de un correo electronico."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    with patch("engine.actions.desktop_recorder.win32gui") as w, patch(
+        "engine.actions.desktop_recorder._foco_de_teclado", return_value=(None, False)
+    ):
+        w.GetForegroundWindow.return_value = 111
+        from pynput.keyboard import Key
+
+        grabadora._al_tecla(Key.ctrl_l)
+        grabadora._al_tecla(Key.alt_gr)
+        grabadora._al_tecla(_TeclaFalsa("@"))
+        grabadora._al_soltar_tecla(Key.alt_gr)
+        grabadora._al_soltar_tecla(Key.ctrl_l)
+        grabadora._al_tecla(_TeclaFalsa("x"))
+
+    assert grabadora._buffer_texto == "@x"
+
+
+def test_grabadora_password_por_estilo_nunca_llega_al_buffer() -> None:
+    """Llegar al campo de contraseña con Tab desde el de usuario deja el
+    ultimo click en el campo de USUARIO (no password). El estilo
+    ES_PASSWORD del control enfocado es lo que evita que ampliar la
+    captura convierta esto en grabar la contraseña en texto plano."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True, _ultimo_click_es_password=False)
+
+    _teclea(grabadora, "secreta123", clase_foco="Edit", password_estilo=True)
+
+    assert grabadora._buffer_texto == ""
+    assert grabadora._se_tecleo_password is True
+    grabadora._flush_texto()
+    assert grabadora.pasos == [{"tipo": "escribir_credencial"}]
+    assert "secreta123" not in str(grabadora.pasos)
+
+
+def test_grabadora_tab_se_graba_como_cambio_de_foco() -> None:
+    """Recorrer un formulario con Tab generaba el texto de cada campo pero
+    nada que moviera el foco entre ellos: al reproducir, todo el texto
+    caia en el primer campo."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    _teclea(grabadora, "luis")
+    with patch("engine.actions.desktop_recorder.win32gui") as w:
+        w.GetForegroundWindow.return_value = 111
+        from pynput.keyboard import Key
+
+        grabadora._al_tecla(Key.tab)
+    _teclea(grabadora, "1234")
+    grabadora._flush_texto()
+
+    assert grabadora.pasos == [
+        {"tipo": "escribir", "valor": "luis"},
+        {"tipo": "tecla_navegacion", "tecla": "TAB"},
+        {"tipo": "escribir", "valor": "1234"},
+    ]
+
+
+def test_generar_codigo_tab_produce_atajo_reproducible() -> None:
+    pasos = [
+        {"tipo": "conectar", "modo": "titulo", "valor": "Login"},
+        {"tipo": "escribir", "valor": "luis"},
+        {"tipo": "tecla_navegacion", "tecla": "TAB"},
+        {"tipo": "escribir", "valor": "1234"},
+    ]
+    codigo = generar_codigo_escritorio("mi_prueba", pasos)
+    _compila_sin_error(codigo)
+    assert 'self.escritorio.atajo("{TAB}")' in codigo
+
+
+def test_grabadora_tecleo_fuera_de_la_ventana_objetivo_sigue_ignorandose() -> None:
+    """Ampliar la captura NO debe abrir la puerta que el diseño cerro a
+    proposito: teclear en otra ventana se sigue ignorando entero."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=False, _ultimo_click_tipo="Pane")
+
+    _teclea(grabadora, "secreto de otra app", hwnd=222)
+
+    assert grabadora._buffer_texto == ""
+    assert grabadora.pasos == []
+
+
+def test_foco_de_teclado_con_ventana_inexistente_no_mira_otra_aplicacion() -> None:
+    """GetGUIThreadInfo(0) NO falla: devuelve el foco del hilo en PRIMER
+    PLANO. Si el HWND objetivo ya no existe hay que cortar antes de
+    llamarlo, o se acabaria clasificando el tecleo mirando la ventana de
+    otra aplicacion cualquiera."""
+    with patch("engine.actions.desktop_recorder.win32process") as w:
+        w.GetWindowThreadProcessId.return_value = (0, 0)  # ventana muerta
+
+        assert _foco_de_teclado(0x1234) == (None, False)
+
+
+# --------------------------------------------------------------------------
+# Operar apps donde el campo de texto no tiene un nombre estable (Discord,
+# Electron, navegadores): el texto visible de un campo es su CONTENIDO.
+# --------------------------------------------------------------------------
+
+
+def test_grabadora_click_en_campo_de_texto_no_usa_su_valor_como_localizador() -> None:
+    """Caso real reproducido contra Discord: su caja de mensajes es un Edit
+    cuyo window_text() es su propio contenido ('\\ufeff\\n' vacia). La
+    grabacion guardaba ese valor como localizador y al reproducir reventaba
+    con ElementNotFoundError. Debe grabarse por TIPO."""
+    grabadora = GrabadoraEscritorio(_LoggerFalso())
+    grabadora._grabando = True
+
+    with patch("engine.actions.desktop_recorder.win32gui") as w, patch.object(
+        GrabadoraEscritorio, "_control_en", return_value=("﻿\n", "Edit", False)
+    ), patch.object(GrabadoraEscritorio, "_indice_entre_coincidencias"):
+        w.WindowFromPoint.return_value = 111
+        w.GetAncestor.return_value = 111
+        w.GetWindowText.return_value = "Discord"
+        w.ScreenToClient.return_value = (812, 979)
+
+        grabadora._al_click(812, 979, None, True)
+
+    clicks = [p for p in grabadora.pasos if p["tipo"].startswith("click")]
+    assert clicks == [
+        {"tipo": "click_editable", "control_tipo": "Edit", "x": 812, "y": 979}
+    ]
+    # el contenido del campo NO debe aparecer en ningun paso
+    assert "﻿" not in str(grabadora.pasos)
+
+
+def test_generar_codigo_click_editable_usa_click_por_tipo() -> None:
+    pasos = [
+        {"tipo": "conectar", "modo": "titulo", "valor": "Discord"},
+        {"tipo": "click_editable", "control_tipo": "Edit", "x": 812, "y": 979},
+        {"tipo": "escribir", "valor": "hola"},
+    ]
+    codigo = generar_codigo_escritorio("mi_prueba", pasos)
+    _compila_sin_error(codigo)
+    assert "self.escritorio.click_por_tipo('Edit')" in codigo
+    assert "click_por_texto" not in codigo
+
+
+def test_generar_codigo_click_editable_con_varios_campos_lleva_found_index() -> None:
+    pasos = [
+        {"tipo": "conectar", "modo": "titulo", "valor": "Login"},
+        {"tipo": "click_editable", "control_tipo": "Edit", "x": 10, "y": 20, "found_index": 1},
+    ]
+    codigo = generar_codigo_escritorio("mi_prueba", pasos)
+    _compila_sin_error(codigo)
+    assert "self.escritorio.click_por_tipo('Edit', found_index=1)" in codigo
+
+
+def test_grabadora_campo_password_sigue_teniendo_prioridad_sobre_click_editable() -> None:
+    """Un Edit marcado IsPassword debe seguir grabandose como
+    click_password (coordenadas, sin valor), no como click_editable."""
+    grabadora = GrabadoraEscritorio(_LoggerFalso())
+    grabadora._grabando = True
+
+    with patch("engine.actions.desktop_recorder.win32gui") as w, patch.object(
+        GrabadoraEscritorio, "_control_en", return_value=("micontraseña", "Edit", True)
+    ), patch.object(GrabadoraEscritorio, "_indice_entre_coincidencias"):
+        w.WindowFromPoint.return_value = 111
+        w.GetAncestor.return_value = 111
+        w.GetWindowText.return_value = "Login"
+        w.ScreenToClient.return_value = (7, 7)
+
+        grabadora._al_click(7, 7, None, True)
+
+    clicks = [p for p in grabadora.pasos if p["tipo"].startswith("click")]
+    assert clicks == [{"tipo": "click_password", "control_tipo": "Edit", "x": 7, "y": 7}]
+    assert "micontraseña" not in str(grabadora.pasos)
+
+
+# --------- regresiones de dos defectos que llegaban al codigo generado ---------
+
+
+def test_la_barra_espaciadora_se_graba_y_el_texto_no_queda_pegado() -> None:
+    """Defecto real: en Windows pynput resuelve el codigo virtual antes de
+    traducirlo a caracter, y VK_SPACE esta en su tabla de teclas
+    especiales -- getattr(Key.space, "char") es None, asi que el filtro de
+    _al_tecla la descartaba. TODO texto con espacios llegaba pegado al .py
+    generado ("Reporte diario" -> "Reportediario") y la automatizacion
+    escribia un valor que no existe."""
+    from pynput.keyboard import Key
+
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    with patch("engine.actions.desktop_recorder.win32gui") as w, patch(
+        "engine.actions.desktop_recorder._foco_de_teclado", return_value=("Edit", False)
+    ):
+        w.GetForegroundWindow.return_value = 111
+        w.GetAncestor.side_effect = lambda hwnd, _bandera: hwnd
+        for tecla in ("R", "e", "p", Key.space, "d", "i", "a"):
+            grabadora._al_tecla(tecla if tecla is Key.space else _TeclaFalsa(tecla))
+
+    grabadora._flush_texto()
+    assert grabadora.pasos == [{"tipo": "escribir", "valor": "Rep dia"}]
+
+
+def test_el_tecleo_en_un_dialogo_de_la_ventana_grabada_si_se_captura() -> None:
+    """Defecto real: un dialogo propio ("Guardar como", "Buscar", un login
+    modal) es una ventana DISTINTA con su propio hwnd, y comparar el foco
+    por igualdad estricta descartaba en silencio todo lo tecleado ahi --
+    era el unico descarte mudo de la grabadora y el que hacia que el
+    sintoma se sintiera como "la grabadora no escribe"."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    # hwnd 999 es el dialogo; su GA_ROOTOWNER es la ventana grabada (111)
+    duenios = {999: 111, 111: 111}
+    with patch("engine.actions.desktop_recorder.win32gui") as w, patch(
+        "engine.actions.desktop_recorder._foco_de_teclado", return_value=("Edit", False)
+    ):
+        w.GetForegroundWindow.return_value = 999
+        w.GetAncestor.side_effect = lambda hwnd, _bandera: duenios.get(hwnd, hwnd)
+        for caracter in "informe":
+            grabadora._al_tecla(_TeclaFalsa(caracter))
+
+    grabadora._flush_texto()
+    assert grabadora.pasos == [{"tipo": "escribir", "valor": "informe"}]
+    assert grabadora.teclas_ignoradas == 0
+
+
+def test_el_tecleo_descartado_queda_contado_y_no_es_un_descarte_mudo() -> None:
+    """Ampliar la captura a los dialogos propios no debe volver mudo el
+    descarte: lo que cae en una ventana ajena se sigue ignorando, pero
+    ahora se cuenta -- con el mismo criterio que clicks_ignorados, para
+    que la UI pueda avisarlo EN VIVO."""
+    grabadora = _grabadora_lista(_ultimo_click_editable=True)
+
+    _teclea(grabadora, "secreto", hwnd=222)
+
+    assert grabadora.pasos == []
+    assert grabadora.teclas_ignoradas == len("secreto")

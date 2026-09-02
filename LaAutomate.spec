@@ -1,4 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 datas = [('app/resources/app_icon.ico', 'app/resources')]
@@ -25,6 +27,18 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Qt6Core enlaza icuuc.dll y en Windows 10 eso lo resuelve el ICU del propio
+# sistema (System32\icuuc.dll, un forwarder de 29 KB). PyInstaller, al rastrear
+# dependencias, encuentra OTRO icuuc.dll en el PATH y lo copia junto al .exe:
+# esa copia local eclipsa a la del sistema, no exporta los ucnv_* que Qt pide y
+# el .exe muere al arrancar con "DLL load failed while importing QtGui"
+# (WinError 127) -- sin sintoma alguno durante el build. Se excluyen para que
+# Windows resuelva ICU igual que cuando la app corre desde el venv.
+a.binaries = [
+    b for b in a.binaries
+    if not os.path.basename(b[0]).lower().startswith(("icuuc", "icudt", "icuin"))
+]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -32,7 +46,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='LAAutomate',
+    name='LaAutomate',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -52,5 +66,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='LAAutomate',
+    name='LaAutomate',
 )

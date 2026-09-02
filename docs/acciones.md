@@ -21,9 +21,49 @@ al terminar, falle o no.
 | `escribir(selector, texto, by=By.CSS_SELECTOR)` | Espera visibilidad, limpia el campo y escribe. |
 | `leer_texto(selector, by=By.CSS_SELECTOR)` | Espera visibilidad y devuelve el texto. |
 | `screenshot_error(nombre)` | Guarda una captura en `logs/screenshots/`. Lo llama el runner solo. |
-| `cerrar()` | Cierra el navegador si estaba abierto. |
+| `cerrar()` | Cierra el navegador entero, con todas sus pestañas. |
 
 Las esperas son explícitas: no hace falta `time.sleep` entre pasos.
+
+### Pestañas
+
+| Método | Qué hace |
+|---|---|
+| `pestanas()` | Títulos de las pestañas abiertas, en el orden del navegador. Deja el foco donde estaba. |
+| `cambiar_a_pestana(referencia)` | Cambia de pestaña por índice (`0`, `1`…) o por un fragmento de su título o URL. Devuelve el título. |
+| `cambiar_a_pestana_nueva(timeout=None)` | Espera a que aparezca una pestaña que no existía y cambia a ella. **Es el método a usar justo después del click que la abre.** |
+| `nueva_pestana(url=None)` | Abre una pestaña, cambia a ella y opcionalmente navega. |
+| `cerrar_pestana()` | Cierra la pestaña actual y deja el foco en otra válida. |
+
+**Por qué cambiar de pestaña tiene que ser explícito.** Selenium no sigue a una
+pestaña nueva por su cuenta. Cuando un click abre una (`target="_blank"`,
+`window.open`, un "abrir en pestaña nueva"), el navegador se la muestra al
+usuario pero el driver se queda apuntando a la pestaña **vieja**: los pasos
+siguientes se ejecutan contra la página anterior y fallan con
+`NoSuchElementException` — o peor, encuentran un elemento con el mismo selector
+y hacen algo en la página equivocada, sin error y sin aviso.
+
+```python
+self.web.ir_a("https://portal.interno/facturas")
+self.web.click("#ver-comprobante")        # esto abre una pestaña
+self.web.cambiar_a_pestana_nueva()        # sin esta línea, lo de abajo
+folio = self.web.leer_texto("#folio")     # se leería de la pestaña anterior
+self.web.cerrar_pestana()                 # vuelve a la pestaña del portal
+```
+
+Prefiere `cambiar_a_pestana("factur")` sobre `cambiar_a_pestana(1)`: el índice de
+una pestaña depende del orden en que se abrieron, que no es estable entre
+corridas cuando la aplicación abre pestañas sola. La búsqueda por texto mira el
+título **y** la URL, y la URL suele ser lo más estable de los dos (el título de
+una SPA cambia solo: `"(3) Bandeja de entrada"`).
+
+Dos pestañas del mismo navegador comparten sesión y cookies; dos navegadores
+distintos no. Por eso, para trabajar dos sistemas en paralelo con la misma
+sesión, `nueva_pestana()` es lo correcto y abrir un segundo `WebActions` no.
+
+La Grabadora web ya genera estas llamadas sola: si durante la grabación un click
+abre una pestaña, la grabadora la sigue y emite `cambiar_a_pestana_nueva()` en el
+código generado.
 
 ---
 
@@ -91,6 +131,44 @@ respaldo para apps sin árbol de accesibilidad usable.
 Los `titulo_regex` son **expresiones regulares**, no texto literal: pywinauto empareja
 con `title_re`. Si el título trae espacios, paréntesis o puntos, escápalos —
 `re.escape()` es la forma segura de armarlos cuando el título depende de una variable.
+
+### Varias aplicaciones en una misma automatización
+
+`self.escritorio` mantiene **una** ventana conectada a la vez. Cambiar de
+aplicación es volver a conectar: cada `conectar_por_titulo()` /
+`conectar_por_clase()` reemplaza la ventana activa, y todo lo que venga después
+(`click_por_texto`, `escribir`, `atajo`) va dirigido a esa.
+
+```python
+self.escritorio.conectar_por_titulo(re.escape("Calculadora"))
+self.escritorio.click_por_texto("5", control_type="Button")
+
+self.escritorio.conectar_por_titulo(r".* - Bloc de notas")   # otra app
+self.escritorio.escribir("resultado pegado aquí")            # va al Bloc de notas
+```
+
+No hace falta cerrar ni "desconectar" la anterior: sigue abierta y se puede
+volver a ella con otro `conectar_por_titulo()`. El estado que se pierde al
+cambiar es solo cuál es la ventana activa.
+
+**Una app recién lanzada acepta la conexión antes de aceptar teclas.** Conectar
+solo espera a que la ventana *exista*; escribir de inmediato hace que las
+primeras teclas se pierdan mientras la app termina de inicializarse. Comprobado
+con el Bloc de notas: `"hola desde LaAutomate"` llegó como `"holae LaAutomate"`.
+Si acabas de lanzar la aplicación, pon un `self.escritorio.esperar(2)` antes de
+la primera escritura. Conectar a una app **ya abierta** no tiene este problema.
+
+**Si la app está minimizada o en segundo plano**, `conectar_por_titulo()` la
+despierta sola. Vale la pena saber por qué: Windows "encoge" (*cloak*) las
+ventanas de apps UWP suspendidas, y una ventana así es invisible para UI
+Automation aunque `IsWindowVisible()` diga que sí — `connect()` se quedaba
+esperando hasta agotar el tiempo, con un `TimeoutError` sin pistas, sobre una app
+que estaba perfectamente abierta. Ambos métodos reintentan tras restaurarla.
+
+Para **grabar** un proceso que toca varias apps, la vista Grabadora tiene la
+casilla *"Cualquier ventana (sin candado)"*; sin ella solo se graba la ventana
+del primer click. Ver [Lógica de la Grabadora](logica-grabadora.md#modo-escritorio)
+para por qué el candado existe y cuándo conviene quitarlo.
 
 ---
 

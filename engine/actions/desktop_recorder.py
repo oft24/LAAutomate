@@ -34,6 +34,8 @@ notar y detener una revinculacion que no esperaba.
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes as wintypes
 import os
 import queue
 import re
@@ -48,7 +50,53 @@ import win32process
 
 from engine.actions.recorder import nombre_de_clase, validar_nombre  # reusa la misma validacion
 
+# Tipos de UI Automation que son SEGURO un campo de texto. Es la via
+# rapida, no la unica: ver _contexto_de_tecleo.
 _TIPOS_EDITABLES = {"Edit", "ComboBox", "Document"}
+
+# Tipos donde una tecla imprimible NO es texto sino un atajo: la barra
+# espaciadora "presiona" un boton, una letra salta al primer item que
+# empieza por ella en una lista. Solo en estos se descarta el tecleo.
+# Todo lo demas -- incluidos Pane, Custom, Group y Text, que es como
+# Chrome/Electron y los clientes VNC exponen sus editores -- se considera
+# contexto de texto.
+_TIPOS_SIN_TEXTO = {
+    "Button",
+    "CheckBox",
+    "RadioButton",
+    "Menu",
+    "MenuBar",
+    "MenuItem",
+    "ScrollBar",
+    "Slider",
+    "SplitButton",
+    "TabItem",
+    "Thumb",
+    "TreeItem",
+}
+
+# Clases Win32 de controles de texto nativos. Si el foco REAL de teclado
+# cae en una de estas se graba texto aunque el ultimo click se haya
+# clasificado como otra cosa -- o aunque no haya habido click, que es lo
+# normal al moverse entre campos de un formulario con Tab.
+_CLASES_TEXTO_WIN32 = ("edit", "richedit", "textbox", "scintilla", "syndatetimepick")
+
+# Teclas que solo modifican a otra; se rastrean para distinguir "escribir"
+# de "atajo". OJO con alt_gr: en un teclado español AltGr+2 es "@" y
+# Windows lo reporta como Ctrl+Alt, asi que bloquear todo lo que lleve
+# Ctrl romperia escribir un correo. La regla real esta en _al_tecla.
+_MODIFICADORES = {
+    "alt": "alt",
+    "alt_l": "alt",
+    "alt_r": "alt",
+    "alt_gr": "alt",
+    "ctrl": "ctrl",
+    "ctrl_l": "ctrl",
+    "ctrl_r": "ctrl",
+    "cmd": "cmd",
+    "cmd_l": "cmd",
+    "cmd_r": "cmd",
+}
 
 # Tope al buscar cuantos controles comparten el mismo (texto, tipo) dentro
 # de la ventana grabada. Es solo para desambiguar un click; si hubiera mas
@@ -73,6 +121,10 @@ _ESPERA_DESAMBIGUACION_AL_DETENER = 8.0
 # segura de grabar "muevete entre correos" sin que el .py generado
 # termine con datos reales de correspondencia.
 _NOMBRES_TECLAS_NAVEGACION = {
+    # Tab mueve el foco al campo siguiente: sin grabarlo, un formulario
+    # recorrido con Tab generaba el texto de cada campo pero nada que
+    # moviera el foco entre ellos, y al reproducir todo caia en el primero.
+    "tab": "TAB",
     "up": "UP",
     "down": "DOWN",
     "left": "LEFT",
@@ -82,6 +134,75 @@ _NOMBRES_TECLAS_NAVEGACION = {
     "home": "HOME",
     "end": "END",
 }
+
+
+class _RECT(ctypes.Structure):
+    _fields_ = [
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
+    ]
+
+
+class _GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", _RECT),
+    ]
+
+
+def _foco_de_teclado(hwnd_ventana: int) -> tuple[str | None, bool]:
+    """(clase_del_control_con_foco, es_password) dentro de `hwnd_ventana`.
+
+    Responde QUE control tiene el foco de teclado ahora mismo, que no es
+    lo mismo que "donde fue el ultimo click": a un campo se llega tambien
+    con Tab, o ya venia enfocado al empezar a grabar.
+
+    Se usa GetGUIThreadInfo por ctypes y no win32gui.GetFocus() por dos
+    razones: pywin32 no expone GetGUIThreadInfo, y GetFocus() solo ve la
+    cola de entrada del hilo que llama -- para leer la de otro proceso
+    haria falta AttachThreadInput, que engancha dos colas de mensajes y
+    NO puede hacerse desde el callback del hook de bajo nivel sin
+    arriesgar el LowLevelHooksTimeout que mata la grabacion. GetGUIThreadInfo
+    es una sola llamada, sin bloqueo y entre procesos.
+
+    Ante cualquier fallo devuelve (None, False): el llamador se queda con
+    la clasificacion del ultimo click, nunca se pierde una tecla por esto.
+    """
+    try:
+        id_hilo, _ = win32process.GetWindowThreadProcessId(hwnd_ventana)
+        if not id_hilo:
+            # HWND que ya no existe. Hay que cortar aqui: GetGUIThreadInfo(0)
+            # NO falla, devuelve el foco del hilo en PRIMER PLANO -- es decir,
+            # el de otra aplicacion cualquiera. Seguir habria significado
+            # clasificar el tecleo mirando una ventana ajena.
+            return None, False
+        info = _GUITHREADINFO()
+        info.cbSize = ctypes.sizeof(_GUITHREADINFO)
+        if not ctypes.windll.user32.GetGUIThreadInfo(wintypes.DWORD(id_hilo), ctypes.byref(info)):
+            return None, False
+        hwnd_foco = info.hwndFocus or info.hwndActive
+        if not hwnd_foco:
+            return None, False
+        clase = win32gui.GetClassName(hwnd_foco)
+        # ES_PASSWORD es el estilo de un Edit enmascarado. Detectarlo AQUI
+        # (y no solo al hacer click) es lo que protege el caso real de
+        # llegar al campo de contraseña con Tab desde el de usuario: sin
+        # esto el ultimo click seguia siendo el campo de usuario -- no
+        # password -- y la contraseña se habria grabado en texto plano.
+        estilo = win32gui.GetWindowLong(hwnd_foco, win32con.GWL_STYLE)
+        es_password = bool(int(estilo) & win32con.ES_PASSWORD)
+        return str(clase), es_password
+    except Exception:
+        return None, False
 
 
 @dataclass
@@ -123,8 +244,11 @@ class GrabadoraEscritorio:
         self._buffer_texto = ""
         self._ultimo_click_editable = False
         self._ultimo_click_es_password = False
+        self._ultimo_click_tipo = ""
         self._se_tecleo_password = False
+        self._modificadores: set[str] = set()
         self._clicks_ignorados_fuera_de_ventana = 0
+        self._teclas_ignoradas_fuera_de_ventana = 0
         self._ventanas_revinculadas = 0
         self._marca_conectar_tras_rebind = False
         self._necesita_conectar = False
@@ -142,8 +266,11 @@ class GrabadoraEscritorio:
         self._buffer_texto = ""
         self._ultimo_click_editable = False
         self._ultimo_click_es_password = False
+        self._ultimo_click_tipo = ""
         self._se_tecleo_password = False
+        self._modificadores: set[str] = set()
         self._clicks_ignorados_fuera_de_ventana = 0
+        self._teclas_ignoradas_fuera_de_ventana = 0
         self._ventanas_revinculadas = 0
         self._marca_conectar_tras_rebind = False
         self._necesita_conectar = False
@@ -175,7 +302,9 @@ class GrabadoraEscritorio:
         self._hilo_desambiguacion.start()
 
         self._listener_mouse = mouse.Listener(on_click=self._al_click)
-        self._listener_teclado = keyboard.Listener(on_press=self._al_tecla)
+        self._listener_teclado = keyboard.Listener(
+            on_press=self._al_tecla, on_release=self._al_soltar_tecla
+        )
         self._listener_mouse.start()
         self._listener_teclado.start()
         if self.modo_ventana == "multiple":
@@ -207,6 +336,11 @@ class GrabadoraEscritorio:
         if self._clicks_ignorados_fuera_de_ventana:
             self.logger.info(
                 "Se ignoraron %d click(s) fuera de la ventana grabada", self._clicks_ignorados_fuera_de_ventana
+            )
+        if self._teclas_ignoradas_fuera_de_ventana:
+            self.logger.info(
+                "Se ignoraron %d tecla(s) por caer fuera de la ventana grabada",
+                self._teclas_ignoradas_fuera_de_ventana,
             )
         if self._ventanas_revinculadas:
             self.logger.info(
@@ -254,6 +388,15 @@ class GrabadoraEscritorio:
         return self._clicks_ignorados_fuera_de_ventana
 
     @property
+    def teclas_ignoradas(self) -> int:
+        """Cuantas teclas se han descartado por caer en una ventana que no
+        es la objetivo ni un dialogo suyo. Se expone con el MISMO criterio
+        que clicks_ignorados y ventanas_revinculadas: mientras este descarte
+        fue mudo, el usuario terminaba una grabacion entera creyendo que
+        "la grabadora no escribe" sin ninguna pista de por que."""
+        return self._teclas_ignoradas_fuera_de_ventana
+
+    @property
     def ventanas_revinculadas(self) -> int:
         """Cuantas veces la ventana objetivo se revinculó a una ventana
         nueva porque la anterior ya no existía (ej. un diálogo de login
@@ -278,7 +421,7 @@ class GrabadoraEscritorio:
             return
 
         if self._es_ventana_propia(hwnd_raiz):
-            # Un click sobre la propia app LAAutomate (tipico: el boton
+            # Un click sobre la propia app LaAutomate (tipico: el boton
             # "Detener y generar código" que el usuario presiona para
             # TERMINAR la grabación) nunca debe grabarse como parte de la
             # automatización -- ni fijar la ventana objetivo, ni disparar
@@ -286,7 +429,7 @@ class GrabadoraEscritorio:
             # existió para la grabadora. Bug real: sin este guard, si la
             # ventana objetivo se cerraba justo antes (ej. una sesión VNC
             # que termina), el siguiente click legítimo del usuario para
-            # detener la grabación se reenlazaba a LAAutomate mismo y
+            # detener la grabación se reenlazaba a LaAutomate mismo y
             # quedaba como el último paso grabado -- irreproducible, porque
             # ese botón está deshabilitado fuera de una grabación en curso.
             return
@@ -368,6 +511,8 @@ class GrabadoraEscritorio:
 
         paso_click_con_texto: dict | None = None
 
+        paso_click_editable: dict | None = None
+
         with self._lock:
             if identificador and self._necesita_conectar:
                 # SOLO se emite un "conectar" nuevo cuando la ventana
@@ -428,6 +573,23 @@ class GrabadoraEscritorio:
                 self.pasos.append(
                     {"tipo": "click_password", "control_tipo": tipo_control, "x": x_rel, "y": y_rel}
                 )
+            elif tipo_control in _TIPOS_EDITABLES:
+                # En un campo de texto, window_text() NO es una etiqueta:
+                # es lo que hay escrito dentro. Grabarlo como localizador
+                # produce codigo que solo funciona mientras el campo tenga
+                # ese mismo valor. Caso real: la caja de mensajes de
+                # Discord es un Edit cuyo texto es su propio contenido
+                # ('﻿\n' cuando esta vacia); la grabacion guardo eso y
+                # al reproducir reventaba con ElementNotFoundError. Se
+                # localiza por TIPO, que en esa ventana es unico, y se
+                # guardan las coordenadas como respaldo.
+                paso_click_editable = {
+                    "tipo": "click_editable",
+                    "control_tipo": tipo_control,
+                    "x": x_rel,
+                    "y": y_rel,
+                }
+                self.pasos.append(paso_click_editable)
             elif texto_control:
                 # Se agrega YA, sin found_index: resolver la ambiguedad
                 # cuesta cientos de ms de consultas UIA y no puede ir antes
@@ -451,6 +613,7 @@ class GrabadoraEscritorio:
 
         self._ultimo_click_editable = tipo_control in _TIPOS_EDITABLES
         self._ultimo_click_es_password = es_password
+        self._ultimo_click_tipo = tipo_control or ""
 
         # La desambiguacion (cientos de ms de consultas UIA) se delega al
         # hilo aparte: aqui NO se puede bloquear (ver el comentario de
@@ -458,6 +621,14 @@ class GrabadoraEscritorio:
         if paso_click_con_texto is not None:
             self._cola_desambiguacion.put(
                 (paso_click_con_texto, hwnd_raiz, texto_control, tipo_control, x, y, x_rel, y_rel)
+            )
+        elif paso_click_editable is not None:
+            # texto=None -> se busca SOLO por control_type: en un campo de
+            # texto el contenido no sirve como localizador (ver el comentario
+            # de arriba). Si hay varios campos del mismo tipo, se graba
+            # found_index igual que con los clicks por texto.
+            self._cola_desambiguacion.put(
+                (paso_click_editable, hwnd_raiz, None, tipo_control, x, y, x_rel, y_rel)
             )
 
     # ---------- desambiguacion de controles homonimos (hilo aparte) ----------
@@ -482,7 +653,7 @@ class GrabadoraEscritorio:
         pasos: list[dict],
         paso: dict,
         hwnd_raiz: int,
-        texto: str,
+        texto: str | None,
         tipo: str,
         x: int,
         y: int,
@@ -554,33 +725,100 @@ class GrabadoraEscritorio:
             )
         self._hilo_desambiguacion = None
 
+    def _contexto_de_tecleo(self, hwnd_activo: int) -> tuple[bool, bool]:
+        """(acepta_texto, es_password) para lo que tiene el foco AHORA.
+
+        Antes esto era una sola condicion -- "el ultimo click cayo en un
+        control de tipo Edit/ComboBox/Document" -- y por eso la grabadora
+        no detectaba el tecleo en los casos mas normales: Chrome, Electron
+        (Discord/Teams) y los clientes VNC exponen su editor como Pane o
+        Custom, y llegar a un campo con Tab (o encontrarlo ya enfocado) no
+        deja ningun click que clasificar. El resultado era una grabacion
+        con los clicks pero sin una sola linea de escribir().
+
+        Ahora se decide con tres fuentes, de la mas fiable a la mas
+        general, y basta que una diga que si:
+
+        1. el foco de teclado real es un control de texto de Win32;
+        2. el ultimo click fue clasificado como editable por UI Automation;
+        3. el ultimo click no fue en algo donde teclear es un atajo
+           (boton, casilla, item de lista/menu) -- ver _TIPOS_SIN_TEXTO.
+
+        El password se decide con la union de las dos primeras: el estilo
+        ES_PASSWORD del control enfocado O el IsPassword del ultimo click.
+        Cualquiera que diga que si manda, para que ampliar la captura no
+        pueda convertirse en grabar una contraseña en texto plano.
+        """
+        clase_foco, password_por_estilo = _foco_de_teclado(hwnd_activo)
+        es_password = bool(password_por_estilo or self._ultimo_click_es_password)
+
+        if clase_foco and any(t in clase_foco.lower() for t in _CLASES_TEXTO_WIN32):
+            return True, es_password
+        if self._ultimo_click_editable:
+            return True, es_password
+        return self._ultimo_click_tipo not in _TIPOS_SIN_TEXTO, es_password
+
+    def _al_soltar_tecla(self, key) -> None:
+        modificador = _MODIFICADORES.get(getattr(key, "name", None))
+        if modificador:
+            with self._lock:
+                self._modificadores.discard(modificador)
+
     def _al_tecla(self, key) -> None:
         if not self._grabando or self._hwnd_objetivo is None:
             return
 
-        # el foco de teclado tambien se restringe a la ventana objetivo
+        # El foco de teclado tambien se restringe a la ventana objetivo,
+        # pero comparar por igualdad estricta era demasiado estrecho: un
+        # dialogo PROPIO de esa ventana ("Guardar como", "Buscar", un login
+        # modal) es una ventana distinta, con su propio hwnd, y todo lo
+        # tecleado ahi se descartaba EN SILENCIO -- era el unico descarte
+        # mudo de la grabadora y justo el que hacia que el sintoma se
+        # sintiera como "la grabadora no escribe". Ahora se acepta tambien
+        # cualquier ventana que comparta el GA_ROOTOWNER de la objetivo, y
+        # lo que aun asi se descarte se cuenta en teclas_ignoradas, con el
+        # mismo criterio que clicks_ignorados: visible en vivo en la UI.
         try:
             hwnd_activo = win32gui.GetForegroundWindow()
         except Exception:
             return
-        if hwnd_activo != self._hwnd_objetivo:
+        if not self._pertenece_al_objetivo(hwnd_activo):
+            self._teclas_ignoradas_fuera_de_ventana += 1
             return
 
         from pynput.keyboard import Key
 
-        if key in (Key.enter, Key.tab):
+        modificador = _MODIFICADORES.get(getattr(key, "name", None))
+        if modificador:
+            with self._lock:
+                self._modificadores.add(modificador)
+            return
+
+        if key == Key.enter:
             # Enter suele ser la accion que CONFIRMA/DISPARA el paso (enviar
             # un login, lanzar el resultado seleccionado en el buscador de
             # Windows) -- sin esto, se grababa el texto tecleado pero nunca
             # el Enter que lo confirma, y el flujo grabado quedaba
-            # incompleto en tiempo de reproduccion. Tab solo sigue siendo
-            # un delimitador de campo (mover el foco ya queda implicito en
-            # los siguientes clicks/tecleo).
-            editable_antes_del_flush = self._ultimo_click_editable
+            # incompleto en tiempo de reproduccion.
+            acepta_texto, _ = self._contexto_de_tecleo(hwnd_activo)
+            with self._lock:
+                habia_texto_pendiente = bool(self._buffer_texto or self._se_tecleo_password)
             self._flush_texto()
-            if key == Key.enter and editable_antes_del_flush:
+            # Se graba si venia texto (el Enter lo confirma) o si el foco
+            # es un campo de texto. Un Enter suelto sobre un boton o una
+            # lista no se graba: ahi ya lo representa el click.
+            if habia_texto_pendiente or (acepta_texto and self._ultimo_click_editable):
                 with self._lock:
                     self.pasos.append({"tipo": "tecla_enter"})
+            return
+
+        if key == Key.backspace:
+            # Corregir mientras se escribe es lo normal; sin esto el buffer
+            # guardaba "holaa" cuando el campo terminaba diciendo "hola".
+            # Si no hay nada pendiente, el borrado actua sobre texto que ya
+            # estaba en el campo y eso no se puede modelar: se ignora.
+            with self._lock:
+                self._buffer_texto = self._buffer_texto[:-1]
             return
 
         codigo_navegacion = _NOMBRES_TECLAS_NAVEGACION.get(getattr(key, "name", None))
@@ -590,11 +828,34 @@ class GrabadoraEscritorio:
                 self.pasos.append({"tipo": "tecla_navegacion", "tecla": codigo_navegacion})
             return
 
-        caracter = getattr(key, "char", None)
-        if not caracter or not self._ultimo_click_editable:
+        # Key.space va aparte: en Windows pynput resuelve el codigo virtual
+        # ANTES de traducirlo a caracter, y VK_SPACE esta en su tabla de
+        # teclas especiales -- getattr(Key.space, "char") es None (mientras
+        # que Key.space.value.char SI es " "), asi que el filtro de la linea
+        # siguiente la descartaba y TODO el texto se grababa pegado:
+        # "Reporte diario" quedaba como "Reportediario". Comprobado contra
+        # pynput real, no deducido.
+        caracter = " " if key == Key.space else getattr(key, "char", None)
+        if not caracter or len(caracter) != 1 or ord(caracter) < 32:
+            # None o caracter de control: con Ctrl presionado pynput
+            # entrega '\x03' para Ctrl+C, '\x16' para Ctrl+V... Nada de
+            # eso es texto que el usuario quisiera reproducir.
             return
 
-        if self._ultimo_click_es_password:
+        with self._lock:
+            modificadores = set(self._modificadores)
+        # La tecla Windows y Alt "a secas" siempre son atajo (Win+R,
+        # Alt+F). Ctrl+Alt NO se descarta: es como Windows reporta AltGr,
+        # y en un teclado español AltGr+2 es "@" -- descartarlo habria
+        # hecho imposible grabar el tecleo de un correo electronico.
+        if "cmd" in modificadores or ("alt" in modificadores and "ctrl" not in modificadores):
+            return
+
+        acepta_texto, es_password = self._contexto_de_tecleo(hwnd_activo)
+        if not acepta_texto:
+            return
+
+        if es_password:
             # NUNCA se guarda la contraseña real, ni siquiera en memoria
             # mas alla de este callback: solo se marca que se tecleo algo,
             # para que _flush_texto grabe un paso que use la Boveda de
@@ -615,10 +876,37 @@ class GrabadoraEscritorio:
                 self.pasos.append({"tipo": "escribir", "valor": self._buffer_texto})
                 self._buffer_texto = ""
 
+    def _pertenece_al_objetivo(self, hwnd: int) -> bool:
+        """True si `hwnd` ES la ventana objetivo o un popup/dialogo suyo.
+
+        GA_ROOTOWNER (no GA_ROOT) es el criterio correcto: sube por la
+        cadena de OWNER, que es la que enlaza un dialogo modal con la
+        ventana que lo abrio -- GA_ROOT solo sube por la de PADRE y
+        devolveria el propio dialogo, dejando el caso sin resolver.
+
+        Ante cualquier fallo devuelve False: se pierde una tecla, pero
+        contada en teclas_ignoradas -- nunca se graba tecleo de una ventana
+        que no se pudo verificar como propia del flujo (ese es exactamente
+        el riesgo que el candado de una sola ventana existe para evitar).
+        """
+        if self._hwnd_objetivo is None or not hwnd:
+            return False
+        if hwnd == self._hwnd_objetivo:
+            return True
+        try:
+            raiz_activa = win32gui.GetAncestor(hwnd, win32con.GA_ROOTOWNER) or hwnd
+            raiz_objetivo = (
+                win32gui.GetAncestor(self._hwnd_objetivo, win32con.GA_ROOTOWNER)
+                or self._hwnd_objetivo
+            )
+        except Exception:
+            return False
+        return raiz_activa == raiz_objetivo
+
     @staticmethod
     def _es_ventana_propia(hwnd: int) -> bool:
         """True si `hwnd` pertenece a ESTE proceso (la propia app
-        LAAutomate) -- comparar por PID, no por título, para que
+        LaAutomate) -- comparar por PID, no por título, para que
         cualquier ventana propia (la principal, un diálogo, un toast)
         quede excluida, no solo la ventana principal por su título
         exacto."""
@@ -630,7 +918,7 @@ class GrabadoraEscritorio:
 
     @staticmethod
     def _indice_entre_coincidencias(
-        hwnd_raiz: int, texto: str, tipo: str, x: int, y: int
+        hwnd_raiz: int, texto: str | None, tipo: str, x: int, y: int
     ) -> tuple[int | None, int]:
         """Devuelve (indice_del_control_clickeado, total_de_coincidencias)
         para los controles de la ventana que comparten el mismo
@@ -650,7 +938,10 @@ class GrabadoraEscritorio:
         codigo grabado reventaba al reproducir con ElementAmbiguousError."""
         from pywinauto import Application, findwindows
 
-        criterios: dict = {"title": texto}
+        # texto=None significa "identifica el control solo por su tipo":
+        # lo usan los campos editables, donde el texto visible es el
+        # contenido del campo y no un nombre estable.
+        criterios: dict = {} if texto is None else {"title": texto}
         if tipo:
             criterios["control_type"] = tipo
 
@@ -744,7 +1035,13 @@ def _depurar_pasos(pasos: list[dict]) -> list[dict]:
                 limpios[-1] = {**limpios[-1], "veces": limpios[-1].get("veces", 1) + 1}
             else:
                 limpios.append(paso)
-        elif paso["tipo"] in ("click", "click_coordenada", "click_password", "tecla_enter"):
+        elif paso["tipo"] in (
+            "click",
+            "click_coordenada",
+            "click_editable",
+            "click_password",
+            "tecla_enter",
+        ):
             limpios.append(paso)
     return limpios
 
@@ -813,6 +1110,17 @@ def generar_codigo_escritorio(nombre_automatizacion: str, pasos: list[dict]) -> 
             tipo_control = _SALTOS_DE_LINEA.sub(" ", paso.get("control_tipo") or "")
             comentario = f"  # {tipo_control}, sin texto identificable" if tipo_control else "  # sin texto identificable"
             lineas_cuerpo.append(f"        self.escritorio.click_en({paso['x']!r}, {paso['y']!r}){comentario}")
+        elif paso["tipo"] == "click_editable":
+            # Se localiza por TIPO y no por texto: en un campo de texto el
+            # texto visible es su contenido, no un nombre (ver _al_click).
+            tipo_control = _SALTOS_DE_LINEA.sub(" ", paso.get("control_tipo") or "Edit")
+            argumentos = [repr(tipo_control)]
+            if paso.get("found_index") is not None:
+                argumentos.append(f"found_index={paso['found_index']!r}")
+            lineas_cuerpo.append(
+                f"        self.escritorio.click_por_tipo({', '.join(argumentos)})"
+                f"  # campo de texto en ({paso['x']}, {paso['y']})"
+            )
         elif paso["tipo"] == "click_password":
             # el VALOR del campo nunca se grabo (ver _al_click) -- ni
             # siquiera con repr(), porque simplemente no se captura: es la
