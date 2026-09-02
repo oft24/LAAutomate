@@ -110,14 +110,19 @@ def test_depurar_pasos_conecta_una_sola_vez_a_la_misma_ventana() -> None:
     assert sum(1 for p in limpios if p["tipo"] == "conectar") == 1
 
 
-def test_depurar_pasos_escribir_se_queda_con_el_ultimo_valor() -> None:
+def test_depurar_pasos_no_pierde_lo_tecleado_en_un_campo_anterior() -> None:
+    """Antes se colapsaban dos "escribir" consecutivos quedandose con el
+    ultimo -- copiando el criterio de la Grabadora web, donde la
+    comparacion es POR SELECTOR (mismo campo). Aqui no hay clave de campo,
+    asi que colapsaba campos DISTINTOS: llenar un login con Tab dejaba
+    solo el ultimo valor y lo demas se perdia sin aviso."""
     pasos = [
-        {"tipo": "escribir", "valor": "ho"},
-        {"tipo": "escribir", "valor": "hola"},
+        {"tipo": "escribir", "valor": "luis.ortiz"},
+        {"tipo": "tecla_tab"},
+        {"tipo": "escribir", "valor": "sucursal7"},
     ]
     limpios = _depurar_pasos(pasos)
-    assert len(limpios) == 1
-    assert limpios[0]["valor"] == "hola"
+    assert [p.get("valor", p["tipo"]) for p in limpios] == ["luis.ortiz", "tecla_tab", "sucursal7"]
 
 
 def test_generar_codigo_escapa_titulo_con_caracteres_de_regex() -> None:

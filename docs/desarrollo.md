@@ -60,6 +60,9 @@ Dónde está cubierto qué:
 | `test_recorder.py` | La grabadora web (lógica pura, sin navegador). |
 | `test_grabadora_web_navegador.py` | La captura de texto de la grabadora web contra un navegador real. Marcado `navegador`. |
 | `test_pestanas.py` | Control de pestañas del navegador y que la grabadora siga las que se abren. |
+| `test_pestanas_navegador.py` | El mismo flujo de pestañas contra un navegador real. Marcado `navegador`. |
+| `test_grabadora_validacion.py` | El camino entero de la grabadora de escritorio contra un escritorio falso: `_al_click`/`_al_tecla` → `_depurar_pasos` → código generado. |
+| `test_vista_grabadora.py` | La descripción de pasos en vivo y el selector de logs. |
 | `test_copilot_teams.py` | Lectura y copiado de tablas de Copilot, envío en Teams. |
 | `test_vault.py` | Bóveda de credenciales sobre `keyring`. |
 | `test_workers.py` | El hilo Qt y la cancelación. |

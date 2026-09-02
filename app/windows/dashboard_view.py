@@ -10,10 +10,12 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QStackedLayout, QVBoxLayout, QWidget
 
+from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.data_table import DataTable, FilaEjecucion
 from app.widgets.empty_state import EmptyState
 from app.widgets.kpi_card import KpiCard
 from app.widgets.page_header import PageHeader
+from app.widgets.status_badge import ESTADOS
 from app.widgets.step_track import StepTrack
 from app.widgets.toast import mostrar_toast
 from app.workers import AutomationWorker
@@ -53,7 +55,17 @@ class DashboardView(QWidget):
             fila_kpis.addWidget(kpi)
         layout_raiz.addLayout(fila_kpis)
 
-        layout_raiz.addWidget(self._subtitulo("Pista de ejecuciones recientes"))
+        # Subtitulo + leyenda en la MISMA fila: la pista colorea cada nodo
+        # por resultado y hasta ahora no habia nada que dijera que
+        # significa cada color -- habia que abrir un nodo para deducirlo.
+        fila_pista = QHBoxLayout()
+        fila_pista.setSpacing(ESPACIADO.md)
+        fila_pista.addWidget(self._subtitulo("Pista de ejecuciones recientes"))
+        fila_pista.addStretch()
+        for estado in ("completado", "con_error", "en_curso"):
+            fila_pista.addWidget(self._marca_leyenda(estado))
+        layout_raiz.addLayout(fila_pista)
+
         self.step_track = StepTrack()
         self.step_track.nodo_clickeado.connect(self._al_click_nodo)
         layout_raiz.addWidget(self.step_track)
@@ -80,6 +92,27 @@ class DashboardView(QWidget):
         self._timer.start(REFRESCO_AUTOMATICO_MS)
 
         self.refrescar()
+
+    @staticmethod
+    def _marca_leyenda(estado: str) -> QWidget:
+        """Punto + nombre, con los MISMOS colores que StatusBadge -- se
+        leen de ESTADOS, no se repiten a mano, para que la leyenda no
+        pueda quedar desfasada de los nodos que explica."""
+        etiqueta, color, _suave = ESTADOS[estado]
+
+        marca = QWidget()
+        fila = QHBoxLayout(marca)
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(5)
+
+        punto = QLabel("●")
+        punto.setStyleSheet(f"color: {color}; font-size: 9px;")
+        fila.addWidget(punto)
+
+        texto = QLabel(etiqueta.lower())
+        texto.setStyleSheet(f"color: {COLORES.grafito}; font-size: {TIPO.t_caption}px;")
+        fila.addWidget(texto)
+        return marca
 
     @staticmethod
     def _subtitulo(texto: str) -> QLabel:

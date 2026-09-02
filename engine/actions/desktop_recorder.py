@@ -63,15 +63,19 @@ _TIPOS_EDITABLES = {"Edit", "ComboBox", "Document"}
 _TIPOS_SIN_TEXTO = {
     "Button",
     "CheckBox",
-    "RadioButton",
+    "Hyperlink",
     "Menu",
     "MenuBar",
     "MenuItem",
+    "RadioButton",
     "ScrollBar",
+    "Separator",
     "Slider",
     "SplitButton",
     "TabItem",
     "Thumb",
+    "TitleBar",
+    "ToolBar",
     "TreeItem",
 }
 
@@ -248,7 +252,7 @@ class GrabadoraEscritorio:
         self._se_tecleo_password = False
         self._modificadores: set[str] = set()
         self._clicks_ignorados_fuera_de_ventana = 0
-        self._teclas_ignoradas_fuera_de_ventana = 0
+        self._teclas_ignoradas = 0
         self._ventanas_revinculadas = 0
         self._marca_conectar_tras_rebind = False
         self._necesita_conectar = False
@@ -270,7 +274,7 @@ class GrabadoraEscritorio:
         self._se_tecleo_password = False
         self._modificadores: set[str] = set()
         self._clicks_ignorados_fuera_de_ventana = 0
-        self._teclas_ignoradas_fuera_de_ventana = 0
+        self._teclas_ignoradas = 0
         self._ventanas_revinculadas = 0
         self._marca_conectar_tras_rebind = False
         self._necesita_conectar = False
@@ -337,10 +341,10 @@ class GrabadoraEscritorio:
             self.logger.info(
                 "Se ignoraron %d click(s) fuera de la ventana grabada", self._clicks_ignorados_fuera_de_ventana
             )
-        if self._teclas_ignoradas_fuera_de_ventana:
+        if self._teclas_ignoradas:
             self.logger.info(
                 "Se ignoraron %d tecla(s) por caer fuera de la ventana grabada",
-                self._teclas_ignoradas_fuera_de_ventana,
+                self._teclas_ignoradas,
             )
         if self._ventanas_revinculadas:
             self.logger.info(
@@ -349,6 +353,53 @@ class GrabadoraEscritorio:
             )
         self.logger.info("Grabación de escritorio detenida: %d paso(s) capturados", len(pasos))
         return pasos
+
+    def cancelar(self) -> int:
+        """Aborta la grabación y DESCARTA lo capturado. Devuelve cuántos
+        pasos se tiraron, solo para poder decírselo al usuario.
+
+        No es `detener()` con la lista ignorada: detener() espera hasta 8 s
+        a que la desambiguación termine de refinar pasos que aquí nadie va
+        a usar, y captura el título final para un código que no se va a
+        generar. Cancelar tiene que soltar los hooks de teclado/mouse YA --
+        es lo que hace alguien que se dio cuenta de que está grabando la
+        ventana equivocada."""
+        self._grabando = False
+        if self._listener_mouse is not None:
+            self._listener_mouse.stop()
+        if self._listener_teclado is not None:
+            self._listener_teclado.stop()
+
+        with self._lock:
+            descartados = len(self.pasos)
+            # se vacia EN EL LUGAR: el hilo de desambiguacion recibio esta
+            # misma lista por argumento y sigue con permiso de tocarla.
+            # Rebindear self.pasos a una lista nueva lo dejaria escribiendo
+            # en la vieja, y los pasos descartados reapareceria.
+            self.pasos.clear()
+            self._buffer_texto = ""
+            self._se_tecleo_password = False
+
+        # el centinela termina el bucle; no se espera al hilo (daemon) --
+        # cancelar no debe bloquear la UI por algo cuyo resultado se tira.
+        if self._hilo_desambiguacion is not None:
+            self._cola_desambiguacion.put(None)
+            self._hilo_desambiguacion = None
+
+        self._hwnd_objetivo = None
+        self._ventana_actual = None
+        self._ultimo_click_editable = False
+        self._ultimo_click_es_password = False
+        self._ultimo_click_tipo = ""
+        self._clicks_ignorados_fuera_de_ventana = 0
+        self._teclas_ignoradas = 0
+        self._ventanas_revinculadas = 0
+        self._marca_conectar_tras_rebind = False
+        self._necesita_conectar = False
+        self._paso_conectar_actual = None
+        self._titulos_alternativos = []
+        self.logger.info("Grabación cancelada por el usuario: %d paso(s) descartados", descartados)
+        return descartados
 
     def _capturar_titulo_final(self) -> None:
         """El titulo de una ventana se observa a partir del SIGUIENTE
@@ -394,7 +445,29 @@ class GrabadoraEscritorio:
         que clicks_ignorados y ventanas_revinculadas: mientras este descarte
         fue mudo, el usuario terminaba una grabacion entera creyendo que
         "la grabadora no escribe" sin ninguna pista de por que."""
-        return self._teclas_ignoradas_fuera_de_ventana
+        return self._teclas_ignoradas
+
+    @property
+    def titulo_objetivo(self) -> str | None:
+        """Titulo de la ventana que se esta grabando ahora mismo, o None si
+        todavia no hay una (nadie ha dado el primer click). Solo para
+        MOSTRARLO: la grabacion sigue atada al HWND, no al titulo -- que
+        cambia (Outlook le pone la carpeta abierta) y por eso nunca se usa
+        para decidir nada aqui."""
+        if self._hwnd_objetivo is None:
+            return None
+        try:
+            return win32gui.GetWindowText(self._hwnd_objetivo) or None
+        except Exception:
+            return None
+
+    def instantanea_de_pasos(self) -> list[dict]:
+        """Copia de los pasos capturados HASTA AHORA, para que la UI pueda
+        mostrarlos en vivo. Copia profunda de cada dict bajo el lock, por
+        el mismo motivo que detener(): el hilo de desambiguacion puede
+        estar mutando esos dicts en este instante."""
+        with self._lock:
+            return [dict(p) for p in self.pasos]
 
     @property
     def ventanas_revinculadas(self) -> int:
@@ -783,7 +856,7 @@ class GrabadoraEscritorio:
         except Exception:
             return
         if not self._pertenece_al_objetivo(hwnd_activo):
-            self._teclas_ignoradas_fuera_de_ventana += 1
+            self._teclas_ignoradas += 1
             return
 
         from pynput.keyboard import Key
@@ -879,10 +952,19 @@ class GrabadoraEscritorio:
     def _pertenece_al_objetivo(self, hwnd: int) -> bool:
         """True si `hwnd` ES la ventana objetivo o un popup/dialogo suyo.
 
-        GA_ROOTOWNER (no GA_ROOT) es el criterio correcto: sube por la
-        cadena de OWNER, que es la que enlaza un dialogo modal con la
-        ventana que lo abrio -- GA_ROOT solo sube por la de PADRE y
-        devolveria el propio dialogo, dejando el caso sin resolver.
+        No basta comparar contra _hwnd_objetivo tal cual: ese handle sale
+        de GetAncestor(WindowFromPoint(...), GA_ROOT) -- la raiz de lo que
+        estaba BAJO EL CURSOR -- mientras GetForegroundWindow() devuelve la
+        ventana ACTIVA. Divergen en casos normales (un menu desplegable es
+        su propia ventana raiz, un dialogo con dueño, una app con varias
+        ventanas de nivel superior), y cuando divergian se descartaba todo
+        el tecleo sin dejar rastro.
+
+        GA_ROOTOWNER (no GA_ROOT) es el criterio correcto para reconciliar
+        las dos: sube por la cadena de OWNER, que es la que enlaza un
+        dialogo modal con la ventana que lo abrio -- GA_ROOT solo sube por
+        la de PADRE y devolveria el propio dialogo, dejando el caso sin
+        resolver. Es tambien lo que NO abre la puerta a una app ajena.
 
         Ante cualquier fallo devuelve False: se pierde una tecla, pero
         contada en teclas_ignoradas -- nunca se graba tecleo de una ventana
@@ -1035,13 +1117,14 @@ def _depurar_pasos(pasos: list[dict]) -> list[dict]:
                 limpios[-1] = {**limpios[-1], "veces": limpios[-1].get("veces", 1) + 1}
             else:
                 limpios.append(paso)
-        elif paso["tipo"] in (
-            "click",
-            "click_coordenada",
-            "click_editable",
-            "click_password",
-            "tecla_enter",
-        ):
+        else:
+            # Cualquier otro paso pasa TAL CUAL. Antes habia una lista
+            # blanca de tipos y todo lo que no estuviera en ella se
+            # descartaba en silencio: un tipo de paso nuevo (o venido de
+            # otra rama) desaparecia del codigo generado sin error, y si
+            # separaba dos "escribir" hacia ademas que se colapsaran entre
+            # si -- llenar un login con Tab dejaba solo el ultimo campo.
+            # Perder un paso no puede ser el comportamiento por defecto.
             limpios.append(paso)
     return limpios
 
@@ -1135,6 +1218,11 @@ def generar_codigo_escritorio(nombre_automatizacion: str, pasos: list[dict]) -> 
             lineas_cuerpo.append(f"        self.escritorio.click_en({paso['x']!r}, {paso['y']!r}){comentario}")
         elif paso["tipo"] == "tecla_enter":
             lineas_cuerpo.append('        self.escritorio.atajo("{ENTER}")')
+        elif paso["tipo"] == "tecla_tab":
+            # Alias de tecla_navegacion/TAB: la grabadora llego a emitir
+            # este tipo por separado. Se traduce igual, en vez de dejar que
+            # un paso valido no genere ninguna linea.
+            lineas_cuerpo.append('        self.escritorio.atajo("{TAB}")')
         elif paso["tipo"] == "tecla_navegacion":
             veces = paso.get("veces", 1)
             # tecla ya viene de _NOMBRES_TECLAS_NAVEGACION (valores fijos

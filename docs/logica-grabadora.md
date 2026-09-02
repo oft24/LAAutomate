@@ -10,7 +10,7 @@ tags:
   - arquitectura
 status: validado
 updated: 2026-09-01
-source_commit: 33952c7 + trabajo local sin commitear
+source_commit: fusion de 6799316 (local) y b71f2fe (origin/main)
 ---
 
 # Lógica de la Grabadora
@@ -38,7 +38,8 @@ reconstruir leyendo el código.
 
 | Componente | Responsabilidad |
 |---|---|
-| `app/windows/recorder_view.py` | Estado de la UI, workers, inicio/detención, generación y guardado. |
+| `app/windows/recorder_view.py` | Estado de la UI, workers, inicio/detención/cancelación, generación y guardado. |
+| `app/widgets/grabacion.py` | El panel de estado en vivo (chips) y la lista de pasos capturados mientras se graba. |
 | `engine/actions/recorder.py` | Grabación Web, listener JavaScript, sondeo y generación de código web. |
 | `engine/actions/desktop_recorder.py` | Hooks globales de mouse/teclado, UI Automation y generación de código de escritorio. |
 | `engine/actions/web.py` | Apertura y operación del navegador con Selenium, incluidas las pestañas. |
@@ -74,6 +75,7 @@ stateDiagram-v2
     Iniciando --> Grabando: worker listo
     Iniciando --> Error: worker falla
     Grabando --> Deteniendo: Detener / F5
+    Grabando --> Reposo: Cancelar (se descarta lo capturado)
     Deteniendo --> Generando: pasos entregados
     Deteniendo --> Error: detener falla
     Generando --> Guardando: código válido
@@ -86,6 +88,32 @@ stateDiagram-v2
 
 Durante `Grabando`, `vista_codigo` sigue siendo de solo lectura y no se actualiza.
 Se llena en `RecorderView._al_detener_listo()` después de generar el código.
+
+### Lo que se ve mientras se graba
+
+El editor de código está vacío hasta detener, pero la grabación no es una caja
+negra. Un sondeo de 500 ms alimenta dos cosas:
+
+| Elemento | Qué muestra |
+|---|---|
+| Panel de estado (`EstadoGrabacion`) | La ventana o URL que se está grabando y tres *chips*: clicks ignorados, teclas ignoradas y revinculaciones. El borde se marca cuando alguno es distinto de cero. |
+| Lista de pasos (`PasosGrabados`) | Los pasos capturados hasta ahora, en lenguaje normal (`describir_paso`). |
+
+Los tres contadores se muestran **a la vez y siempre**, no como un mensaje. Un
+mensaje único tenía que *elegir* qué contar: si avisaba de una revinculación, los
+clicks ignorados desaparecían del texto aunque siguieran subiendo.
+
+**Cancelar** aborta la grabación y descarta lo capturado, sin escribir
+`automations/<nombre>/`. No es "detener e ignorar el resultado": `detener()`
+espera hasta 8 s a que la desambiguación refine pasos que nadie va a usar y
+captura el título final para un código que no se va a generar. Quien cancela se
+acaba de dar cuenta de que fijó la ventana equivocada y necesita que los hooks de
+teclado y mouse se suelten **ya**.
+
+**Ver registro** abre el log de la grabadora sin salir de la vista y lo refresca
+solo cada segundo. Hace falta porque la vista Registros muestra el log más
+reciente de *cualquier* automatización, que durante una grabación casi nunca es
+el de la grabadora — y los avisos que importan aquí solo viven en ese archivo.
 
 ---
 
@@ -391,7 +419,7 @@ las secciones de arriba y las pruebas.
 | Chrome real: escribir y detener sin blur | **Falla funcional reproducida**: falta `escribir`. |
 | Chrome real: escribir y hacer blur | Correcto: aparece `escribir`. |
 
-### 1 de septiembre de 2026 — trabajo local sin commitear
+### 1 de septiembre de 2026 — pestañas y defectos de captura
 
 Tres defectos confirmados de forma reproducible y corregidos, más el control de
 pestañas que no existía.
@@ -404,6 +432,44 @@ pestañas que no existía.
 | Web: escribir y detener sin blur | **Defecto corregido** pasando el listener de `change` a `input`, con las cinco pruebas de regresión que este documento exigía. |
 | Web: control de pestañas | **No existía.** Añadido en `WebActions` y en la grabadora. |
 | Suite completa | 137 aprobadas (eran 117), más 6 pruebas de navegador real. |
+
+### 1 de septiembre de 2026 — fusión con `origin/main`
+
+El repositorio local y `origin/main` habían divergido: ninguno era superconjunto
+del otro. Se fusionaron en `main`.
+
+Los dos lados habían corregido **los mismos dos defectos** (barra espaciadora y
+foco en diálogos propios) de forma independiente y con nombres distintos. Se
+conservó la versión local por ser más general —`_contexto_de_tecleo` consulta
+tres fuentes, `tecla_navegacion` cubre Tab y además flechas, `Home`, `End` y
+`Page Up/Down`, y filtra caracteres de control— y se adoptó el nombre de contador
+de `origin` (`teclas_ignoradas`), más la lista negra de tipos ampliada.
+
+| Qué aportó cada lado | |
+|---|---|
+| Solo local | Control de pestañas, captura web por `input`, `_despertar_ventana` (ventanas *cloaked*), `click_por_tipo`, el `_contexto_de_tecleo` de tres fuentes. |
+| Solo `origin/main` | `cancelar()` en ambas grabadoras, `titulo_objetivo`, `instantanea_de_pasos()`, el panel de estado en vivo, la lista de pasos, el diálogo de registro, el selector de logs y los iconos SVG. |
+
+Se descartó el aviso local de teclas ignoradas *como mensaje de texto*: el panel
+de chips de `origin` muestra los tres contadores a la vez, que es estrictamente
+mejor.
+
+La fusión destapó un defecto propio que ninguna de las dos ramas tenía cubierto:
+`_depurar_pasos()` recorría una lista **blanca** de tipos de paso y descartaba en
+silencio cualquier otro. Un tipo de paso que no estuviera en esa lista
+desaparecía del código generado sin ningún error — y, si separaba dos
+`escribir`, hacía además que esos dos se colapsaran entre sí, que es justo cómo
+se perdía el primer campo de un login llenado con Tab. Ahora los pasos que no
+reconoce pasan tal cual: perder un paso no puede ser el comportamiento por
+defecto.
+
+Tres pruebas de `origin` esperaban `click_en(x, y)` al hacer click en un campo de
+texto. El código fusionado emite `click_por_tipo('Edit')`, que es la rama local y
+es mejor: el texto visible de un `Edit` es su contenido, no un nombre, y una
+coordenada deja de apuntar al campo en cuanto la ventana se mueve o cambia de
+tamaño. Se actualizaron las tres — lo que vigilaban (que los dos campos de un
+login sobrevivan a un Tab, que `Enter` quede como paso propio, que la contraseña
+nunca aparezca en claro) no cambió.
 
 ---
 

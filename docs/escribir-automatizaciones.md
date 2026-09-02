@@ -148,6 +148,12 @@ Dos cosas que la grabadora hace a propósito:
 - **Ignora los clicks sobre la propia app.** Compara por PID, no por título, para que
   el click en "Detener" no termine grabado como un paso de tu automatización.
 
+Mientras grabas, la vista muestra la ventana o URL que está capturando, los pasos
+que lleva y tres contadores: clicks ignorados, teclas ignoradas y veces que la
+ventana objetivo cambió. Si alguno sube cuando no lo esperabas, **Cancelar**
+aborta y descarta todo sin crear la automatización, y **Ver registro** abre el
+log de la grabadora sin salir de la vista.
+
 El código generado es un punto de partida, no un producto terminado: los controles se
 identifican por texto visible, así que un cambio de versión o de idioma de la app
 objetivo puede romperlo. Revísalo siempre.

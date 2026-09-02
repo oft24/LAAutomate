@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -117,9 +118,16 @@ def test_la_grabadora_genera_el_cambio_de_pestana_de_un_flujo_real(web, portal) 
     grabadora.iniciar(portal)
 
     web.driver.find_element("css selector", "#ver-comprobante").click()
-    # el sondeo corre cada 400 ms: se le da margen para ver la pestaña nueva
-    espera = threading.Event()
-    espera.wait(2.0)
+
+    # Se espera A QUE APAREZCA el paso, no una cantidad fija de segundos: el
+    # sondeo corre cada 400 ms y una espera fija pasa en una máquina ociosa y
+    # falla en una cargada, que es exactamente la prueba que nadie vuelve a
+    # creer cuando se pone roja.
+    limite = time.monotonic() + 15
+    while time.monotonic() < limite:
+        if any(p["tipo"] == "cambiar_pestana" for p in grabadora.instantanea_de_pasos()):
+            break
+        time.sleep(0.2)
 
     pasos = grabadora.detener()
     codigo = generar_codigo("flujo_comprobante", pasos)

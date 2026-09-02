@@ -176,6 +176,18 @@ class DataTable(QWidget):
 
         self.tabla.setCellWidget(i, 5, self._boton_menu(i))
 
+        if not fila.exito:
+            # La fila entera se tiñe apenas. El badge de estado ya dice
+            # "Con error", pero en una tabla de veinte filas hay que LEER
+            # esa columna para encontrarlo; el tinte se ve sin leer nada.
+            # COLORES.fila_error es mas claro que oxido_suave a proposito
+            # (ver tokens.py) y no se toca el color del texto: la fila
+            # sigue siendo legible, no un bloque rojo.
+            for columna in (0, 3, 4):
+                celda = self.tabla.item(i, columna)
+                if celda is not None:
+                    celda.setBackground(QColor(COLORES.fila_error))
+
     @staticmethod
     def _centrado(widget: QWidget) -> QWidget:
         envoltorio = QWidget()

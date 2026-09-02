@@ -197,6 +197,9 @@ class DesktopActions:
                 "-- guarda las credenciales de esta automatización en la Bóveda de credenciales."
             )
         self._requiere_ventana()
+        # escapado: `texto` es un DATO (lo que el usuario tecleo al grabar,
+        # o una credencial de la Boveda), nunca una secuencia de atajos --
+        # para eso esta atajo(), que si recibe sintaxis SendKeys cruda.
         self._ventana.type_keys(
             escapar_para_type_keys(texto), with_spaces=True, with_newlines=True, pause=0.02
         )

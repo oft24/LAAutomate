@@ -168,9 +168,14 @@ class GrabadoraWeb:
         self._hilo: threading.Thread | None = None
         self._lock = threading.Lock()
         self.detencion_limpia = True
+        # Ultima URL vista por el hilo de sondeo. La UI la lee para
+        # mostrarla en vivo; NO puede preguntarle al driver por su cuenta
+        # (serian dos hilos sobre la misma sesion de Selenium).
+        self.url_actual: str | None = None
 
     def iniciar(self, url: str) -> None:
         self.pasos = [{"tipo": "ir_a", "url": url}]
+        self.url_actual = url
         self.web.ir_a(url)
         self._registrar_auto_inyeccion()
         self._inyectar_en_pagina_actual()
@@ -219,6 +224,37 @@ class GrabadoraWeb:
 
         self.logger.info("Grabación detenida: %d paso(s) capturados", len(pasos))
         return pasos
+
+    def cancelar(self, tiempo_espera_hilo: float = 5.0) -> int:
+        """Aborta la grabación, DESCARTA lo capturado y cierra el
+        navegador. Devuelve cuántos pasos se tiraron.
+
+        Se reusa detener() en vez de parar el hilo a mano porque toda la
+        cautela de ahí sigue aplicando: si el sondeo quedó bloqueado en un
+        alert()/confirm() nativo, tocar el driver desde este hilo serían
+        dos hilos sobre la misma sesión de Selenium. Lo único que cambia
+        es que el resultado se tira."""
+        pasos = self.detener(tiempo_espera_hilo=tiempo_espera_hilo)
+        with self._lock:
+            self.pasos = []
+        if self.detencion_limpia:
+            try:
+                self.web.cerrar()
+            except Exception as exc:  # noqa: BLE001 - cancelar nunca debe reventar
+                self.logger.debug("Error cerrando el navegador al cancelar: %s", exc)
+        else:
+            self.logger.warning(
+                "Grabación cancelada pero el navegador quedó abierto (el hilo de sondeo seguía "
+                "activo) -- ciérralo manualmente."
+            )
+        self.logger.info("Grabación cancelada por el usuario: %d paso(s) descartados", len(pasos))
+        return len(pasos)
+
+    def instantanea_de_pasos(self) -> list[dict]:
+        """Copia de los pasos capturados hasta ahora, para mostrarlos en
+        vivo. El hilo de sondeo extiende self.pasos bajo el mismo lock."""
+        with self._lock:
+            return [dict(p) for p in self.pasos]
 
     def _registrar_auto_inyeccion(self) -> None:
         """CDP: hace que el script se inyecte solo, automaticamente, en
@@ -280,8 +316,31 @@ class GrabadoraWeb:
             try:
                 driver = self.web.driver
 
-                # Antes de leer nada: si el usuario abrió una pestaña, hay
-                # que seguirlo ahí o todo lo que haga se pierde.
+                # Leer los eventos ANTES de anotar cualquier cambio de
+                # pagina o de pestaña: el click que provoco el cambio quedo
+                # grabado en el localStorage de la pagina VIEJA. Si primero
+                # anotaramos el "ir_a"/"cambiar_pestana", ese click
+                # terminaria DESPUES en la secuencia generada, invertido
+                # respecto a como paso en realidad -- y en el caso de la
+                # pestaña ni siquiera llegaria: cambiar de pestaña primero
+                # significa leer el localStorage de la pestaña nueva, que
+                # esta vacio, y el click se pierde entero.
+                eventos = driver.execute_script(_SONDEO_Y_LIMPIEZA) or []
+                if eventos:
+                    with self._lock:
+                        self.pasos.extend(eventos)
+
+                self._inyectar_en_pagina_actual()
+
+                url_actual = driver.current_url
+                self.url_actual = url_actual
+                if url_actual != url_anterior:
+                    with self._lock:
+                        self.pasos.append({"tipo": "ir_a", "url": url_actual})
+                    url_anterior = url_actual
+
+                # Ya con los eventos de la pestaña anterior a salvo, se
+                # sigue al usuario si abrio una pestaña nueva.
                 if self._seguir_pestana_nueva(driver, handles_conocidos) is not None:
                     self._inyectar_en_pagina_actual()
                     # title/current_url se leen ANTES de tomar el lock: son
@@ -294,28 +353,10 @@ class GrabadoraWeb:
                         )
                     url_anterior = url_nueva
                     self.url_actual = url_nueva
-                # se recalcula SIEMPRE (no solo al abrirse una): así una
+                # se recalcula SIEMPRE (no solo cuando se abrio una): asi una
                 # pestaña cerrada sale del conjunto y, si el usuario vuelve
                 # a abrir otra, se detecta como nueva igual.
                 handles_conocidos = set(driver.window_handles)
-
-                # Leer los eventos ANTES de revisar si la URL cambio: un click
-                # que causo una navegacion rapida quedo grabado en localStorage
-                # de la pagina vieja -- si primero anotaramos el "ir_a" de la
-                # pagina nueva, ese click terminaria despues del ir_a en la
-                # secuencia generada, invertido respecto a como paso en realidad.
-                eventos = driver.execute_script(_SONDEO_Y_LIMPIEZA) or []
-                if eventos:
-                    with self._lock:
-                        self.pasos.extend(eventos)
-
-                self._inyectar_en_pagina_actual()
-
-                url_actual = driver.current_url
-                if url_actual != url_anterior:
-                    with self._lock:
-                        self.pasos.append({"tipo": "ir_a", "url": url_actual})
-                    url_anterior = url_actual
             except Exception as exc:
                 self.logger.debug("Sondeo de grabación interrumpido: %s", exc)
                 return
