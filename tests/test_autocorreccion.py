@@ -44,14 +44,52 @@ def _exito() -> AutomationResult:
     return AutomationResult(success=True)
 
 
-RESPUESTA = """DIAGNOSTICO: el botón se buscaba por su glifo y no por su nombre de accesibilidad.
-CAMBIOS: cambiado click_por_texto('1') por escribir('1')
-PRACTICA: en la Calculadora usa el teclado, no clics por glifo.
+def respuesta(codigo: str = "CODIGO_NUEVO = 1", **cambios) -> str:
+    """Una respuesta que cumple el contrato de docs/PROMPT_REPARACION.md.
 
-```python
-CODIGO_NUEVO = 1
-```
-"""
+    Se construye con una función y no como constante para poder torcer un
+    solo campo por prueba (riesgo, safe_to_execute, status) sin repetir el
+    JSON entero: lo que se prueba son justo esas puertas.
+    """
+    import json as _json
+
+    informe = {
+        "status": "CORRECTION_PROPOSED",
+        "attempt": 1,
+        "failed_step": "click_por_texto('1')",
+        "expected_state": "el botón 1 recibe el clic",
+        "actual_state": "ElementNotFoundError",
+        "root_cause": "el botón se buscaba por su glifo y no por su nombre de accesibilidad",
+        "confidence": 85,
+        "evidence": ["la captura muestra la Calculadora abierta y sin diálogos"],
+        "proposed_correction": {
+            "description": "usar el teclado en vez de clics por glifo",
+            "scope": "una línea",
+            "risk": "LOW",
+            "safe_to_execute": True,
+            "changes": ["cambiado click_por_texto('1') por escribir('12*8=')"],
+        },
+        "reexecution": {"required": True, "start_from": "inicio", "avoid_duplicate_actions": []},
+        "success_validation": ["el display muestra 96"],
+        "learning_candidate": {
+            "problem_pattern": "clic por texto que falla en una app localizada",
+            "general_root_cause": "el nombre de accesibilidad no es el texto dibujado",
+            "successful_strategy": "en la Calculadora usa el teclado, no clics por glifo",
+            "when_to_apply": "la app está traducida y la tarea se puede teclear",
+            "when_not_to_apply": "el control no acepta entrada de teclado",
+            "validation_method": "leer el display tras ejecutar",
+        },
+        "human_summary": "se cambió el clic por glifo por entrada de teclado",
+    }
+    for clave, valor in cambios.items():
+        if clave in ("risk", "safe_to_execute"):
+            informe["proposed_correction"][clave] = valor
+        else:
+            informe[clave] = valor
+    return _json.dumps(informe, ensure_ascii=False) + f"\n\n```python\n{codigo}\n```\n"
+
+
+RESPUESTA = respuesta()
 
 
 @pytest.fixture
@@ -66,11 +104,38 @@ def sin_efectos(monkeypatch, tmp_path):
     )
     monkeypatch.setattr("engine.autocorreccion.obtener", lambda n: _SpecFalso())
     monkeypatch.setattr("engine.autocorreccion.CARPETA_REPARACIONES", tmp_path / "reparaciones")
+    # Sin red: `_modelos_a_probar` consulta la API para armar la lista de
+    # reserva. Sin cortarlo aqui, CADA prueba hacia una peticion real y la
+    # suite pasaba de 6 segundos a mas de cuatro minutos.
+    from core.gemini_client import ModeloGemini
+
+    monkeypatch.setattr(
+        "engine.autocorreccion.listar_modelos",
+        lambda: [ModeloGemini("gemini-3.8-flash"), ModeloGemini("gemini-3.5-flash")],
+    )
     anotadas: list[tuple] = []
     monkeypatch.setattr(
         "engine.practicas.anotar", lambda p, a, e="": (anotadas.append((p, a, e)), True)[1]
     )
-    return {"guardado": guardado, "anotadas": anotadas}
+    # El optimizador de prompt hace su propia llamada al modelo. Cortarlo
+    # aqui, y no prueba por prueba, es lo que garantiza que NINGUNA pueda
+    # salir a la red por olvido: dos que lo hacian tardaban 90 y 120
+    # segundos cada una y la suite pasaba de 6 s a 5 minutos.
+    from engine.optimizador_prompt import ResultadoOptimizacion
+
+    optimizaciones: list[dict] = []
+
+    def _optimizar_falso(**kwargs):
+        optimizaciones.append(kwargs)
+        return ResultadoOptimizacion(
+            actualizado=True,
+            version_anterior="repair_prompt_v1",
+            version_nueva="repair_prompt_v2",
+            regla="comprueba si un diálogo bloquea el elemento antes de cambiar el selector",
+        )
+
+    monkeypatch.setattr("engine.autocorreccion.optimizar", _optimizar_falso)
+    return {"guardado": guardado, "anotadas": anotadas, "optimizaciones": optimizaciones}
 
 
 def _con_respuesta(monkeypatch, *respuestas):
@@ -106,7 +171,7 @@ def test_si_funciona_a_la_primera_no_se_llama_a_gemini(sin_efectos, monkeypatch)
     cliente = _con_respuesta(monkeypatch)  # sin respuestas: llamarlo reventaría
     runner = _RunnerFalso(_exito())
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert reparacion.exito
     assert reparacion.intentos == []
@@ -119,7 +184,7 @@ def test_falla_una_vez_se_repara_y_reanuda(sin_efectos, monkeypatch) -> None:
     _con_respuesta(monkeypatch, RESPUESTA)
     runner = _RunnerFalso(_fallo("ElementNotFoundError: '1'"), _exito())
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert reparacion.exito and reparacion.reparada
     assert len(runner.llamadas) == 2, "tiene que volver a ejecutar tras el arreglo"
@@ -133,10 +198,10 @@ def test_falla_una_vez_se_repara_y_reanuda(sin_efectos, monkeypatch) -> None:
 def test_cada_intento_deja_su_propia_captura(sin_efectos, monkeypatch) -> None:
     """Sin etiquetas distintas, el intento 2 pisaría la captura del 1 --
     y comparar el antes y el después es justo lo que hace falta."""
-    _con_respuesta(monkeypatch, RESPUESTA, RESPUESTA.replace("CODIGO_NUEVO = 1", "CODIGO_NUEVO = 2"))
+    _con_respuesta(monkeypatch, RESPUESTA, respuesta("CODIGO_NUEVO = 2"))
     runner = _RunnerFalso(_fallo("a"), _fallo("b"), _exito())
 
-    Autocorrector(runner).ejecutar(_SpecFalso())
+    Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     etiquetas = [ll["etiqueta"] for ll in runner.llamadas]
     assert etiquetas == ["", "_intento2", "_intento3"]
@@ -147,7 +212,7 @@ def test_siempre_se_pasa_una_bitacora_al_runner(sin_efectos, monkeypatch) -> Non
     _con_respuesta(monkeypatch)
     runner = _RunnerFalso(_exito())
 
-    Autocorrector(runner).ejecutar(_SpecFalso())
+    Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert runner.llamadas[0]["bitacora"] is not None
 
@@ -156,7 +221,7 @@ def test_siempre_se_pasa_una_bitacora_al_runner(sin_efectos, monkeypatch) -> Non
 
 
 def test_el_tope_de_intentos_se_respeta(sin_efectos, monkeypatch) -> None:
-    respuestas = [RESPUESTA.replace("CODIGO_NUEVO = 1", f"CODIGO_NUEVO = {i}") for i in range(9)]
+    respuestas = [respuesta(f"CODIGO_NUEVO = {i}") for i in range(9)]
     _con_respuesta(monkeypatch, *respuestas)
     runner = _RunnerFalso(*[_fallo(f"fallo {i}") for i in range(9)])
 
@@ -173,7 +238,7 @@ def test_no_se_pueden_pedir_mas_de_cinco_intentos(sin_efectos, monkeypatch) -> N
     # Respuestas DISTINTAS: con arreglos idénticos saltaría antes el
     # guardia de "no reintentes con el mismo código", y esta prueba mide
     # el tope, no ese guardia.
-    _con_respuesta(monkeypatch, *[RESPUESTA.replace("= 1", f"= {i}") for i in range(20)])
+    _con_respuesta(monkeypatch, *[respuesta(f"CODIGO_NUEVO = {i}") for i in range(20)])
     runner = _RunnerFalso(*[_fallo("x")] * 20)
 
     Autocorrector(runner, max_intentos=99).ejecutar(_SpecFalso())
@@ -183,21 +248,21 @@ def test_no_se_pueden_pedir_mas_de_cinco_intentos(sin_efectos, monkeypatch) -> N
 
 def test_un_arreglo_identico_corta_el_ciclo(sin_efectos, monkeypatch) -> None:
     """Insistir con un arreglo que no cambia nada solo gasta cuota."""
-    identico = RESPUESTA.replace("CODIGO_NUEVO = 1", "CODIGO_VIEJO = 1")
+    identico = respuesta("CODIGO_VIEJO = 1")
     _con_respuesta(monkeypatch, identico)
     runner = _RunnerFalso(*[_fallo("x")] * 5)
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert len(runner.llamadas) == 1, "no debe reintentar con el mismo código"
     assert "idéntico" in reparacion.intentos[0].motivo_descarte
 
 
 def test_una_respuesta_sin_codigo_corta_el_ciclo(sin_efectos, monkeypatch) -> None:
-    _con_respuesta(monkeypatch, "DIAGNOSTICO: ni idea, lo siento.")
+    _con_respuesta(monkeypatch, respuesta().split("\n\n```python")[0])
     runner = _RunnerFalso(*[_fallo("x")] * 5)
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert len(runner.llamadas) == 1
     assert "bloque de código" in reparacion.intentos[0].motivo_descarte
@@ -218,7 +283,7 @@ def test_un_arreglo_que_no_carga_restaura_el_codigo_anterior(sin_efectos, monkey
     monkeypatch.setattr("engine.autocorreccion.guardar_automatizacion", _guardar_que_falla)
     runner = _RunnerFalso(*[_fallo("x")] * 5)
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert "no se pudo cargar" in reparacion.intentos[0].motivo_descarte
     assert intentos_guardado[-1].strip() == "CODIGO_VIEJO = 1", "debe restaurar el original"
@@ -229,7 +294,7 @@ def test_sin_api_key_se_ejecuta_pero_no_se_repara(sin_efectos, monkeypatch) -> N
     _con_respuesta(monkeypatch)
     runner = _RunnerFalso(*[_fallo("x")] * 3)
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert len(runner.llamadas) == 1
     assert "API key" in reparacion.intentos[0].motivo_descarte
@@ -241,10 +306,10 @@ def test_sin_api_key_se_ejecuta_pero_no_se_repara(sin_efectos, monkeypatch) -> N
 def test_solo_se_aprende_de_las_reparaciones_que_funcionaron(sin_efectos, monkeypatch) -> None:
     """Una «lección» sacada de un arreglo que no arregló nada contamina el
     prompt de todas las reparaciones siguientes."""
-    _con_respuesta(monkeypatch, *[RESPUESTA.replace("= 1", f"= {i}") for i in range(6)])
+    _con_respuesta(monkeypatch, *[respuesta(f"CODIGO_NUEVO = {i}") for i in range(6)])
     runner = _RunnerFalso(*[_fallo("x")] * 6)
 
-    Autocorrector(runner).ejecutar(_SpecFalso())
+    Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert sin_efectos["anotadas"] == [], "no se aprende de un fracaso"
 
@@ -253,7 +318,7 @@ def test_una_reparacion_exitosa_deja_su_practica(sin_efectos, monkeypatch) -> No
     _con_respuesta(monkeypatch, RESPUESTA)
     runner = _RunnerFalso(_fallo("x"), _exito())
 
-    Autocorrector(runner).ejecutar(_SpecFalso())
+    Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert len(sin_efectos["anotadas"]) == 1
     practica, automatizacion, _error = sin_efectos["anotadas"][0]
@@ -262,12 +327,15 @@ def test_una_reparacion_exitosa_deja_su_practica(sin_efectos, monkeypatch) -> No
 
 
 def test_una_practica_vacia_no_se_anota(sin_efectos, monkeypatch) -> None:
-    _con_respuesta(monkeypatch, RESPUESTA.replace(
-        "PRACTICA: en la Calculadora usa el teclado, no clics por glifo.", "PRACTICA: ninguna"
-    ))
+    sin_leccion = respuesta()
+    import json as _json
+    cuerpo, bloque = sin_leccion.split("\n\n```python", 1)
+    datos = _json.loads(cuerpo)
+    datos["learning_candidate"]["successful_strategy"] = ""
+    _con_respuesta(monkeypatch, _json.dumps(datos) + "\n\n```python" + bloque)
     runner = _RunnerFalso(_fallo("x"), _exito())
 
-    Autocorrector(runner).ejecutar(_SpecFalso())
+    Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert sin_efectos["anotadas"] == []
 
@@ -280,14 +348,16 @@ def test_el_prompt_lleva_error_acciones_codigo_y_practicas(sin_efectos, monkeypa
     monkeypatch.setattr("engine.practicas.leer", lambda: "- usa el teclado cuando puedas")
     runner = _RunnerFalso(_fallo("ElementNotFoundError: '1'", "escritorio.click_por_texto('1')"), _exito())
 
-    Autocorrector(runner).ejecutar(_SpecFalso())
+    Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     prompt = cliente.ultimo_prompt
     assert "ElementNotFoundError" in prompt
     assert "click_por_texto('1')" in prompt, "las últimas acciones son el contexto que falta"
     assert "CODIGO_VIEJO" in prompt
     assert "usa el teclado cuando puedas" in prompt, "las prácticas aprendidas se inyectan"
-    assert "DIAGNOSTICO" in prompt and "PRACTICA" in prompt
+    assert "status" in prompt, "el contrato JSON debe ir en el prompt"
+    assert "{{MAX_REPAIR_ATTEMPTS}}" not in prompt, "los marcadores deben venir sustituidos"
+    assert "MAX_REPAIR_ATTEMPTS = 5" in prompt, "y sustituidos por el valor real"
 
 
 def test_se_avisa_del_progreso_mientras_repara(sin_efectos, monkeypatch) -> None:
@@ -344,7 +414,7 @@ def test_si_el_modelo_se_satura_se_prueba_con_otro(sin_efectos, monkeypatch) -> 
     monkeypatch.setattr("engine.autocorreccion.GeminiClient", _ClienteQueSeSatura)
     runner = _RunnerFalso(_fallo("x"), _exito())
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert reparacion.reparada, "debe repararse con el modelo de reserva"
     assert len(usados) == 2 and usados[0] != usados[1]
@@ -372,7 +442,7 @@ def test_un_error_que_no_es_saturacion_no_prueba_otros_modelos(sin_efectos, monk
     monkeypatch.setattr("engine.autocorreccion.GeminiClient", _ClienteConClaveMala)
     runner = _RunnerFalso(*[_fallo("x")] * 3)
 
-    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, mejorar_prompt=False).ejecutar(_SpecFalso())
 
     assert len(llamadas) == 1, "no debe recorrer modelos por un error que no es de saturación"
     assert "no válida" in reparacion.intentos[0].motivo_descarte
@@ -404,3 +474,130 @@ def test_la_pausa_se_deshace_aunque_algo_reviente() -> None:
     bitacora.registrar("escritorio.esperar", "1")
 
     assert len(bitacora.pasos) == 1, "tras el bloque hay que volver a anotar"
+
+
+# ------------------------------------- el prompt se mejora solo tras validar
+
+
+def test_tras_una_reparacion_validada_se_mejora_el_prompt(sin_efectos, monkeypatch) -> None:
+    _con_respuesta(monkeypatch, RESPUESTA)
+    runner = _RunnerFalso(_fallo("ElementNotFoundError: '1'"), _exito())
+
+    Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert len(sin_efectos["optimizaciones"]) == 1
+    llamada = sin_efectos["optimizaciones"][0]
+    assert "ElementNotFoundError" in llamada["error_original"]
+    assert "escribir" in llamada["correccion_exitosa"]
+    assert "success=True" in llamada["validacion"], "solo se aprende de un éxito verificado"
+
+
+def test_una_reparacion_fallida_no_toca_el_prompt(sin_efectos, monkeypatch) -> None:
+    """El contrato del optimizador es explícito: aprender de algo no
+    verificado es peor que no aprender."""
+    _con_respuesta(monkeypatch, *[respuesta(f"CODIGO_NUEVO = {i}") for i in range(6)])
+    runner = _RunnerFalso(*[_fallo("x")] * 6)
+
+    Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert sin_efectos["optimizaciones"] == []
+
+
+# --------------------------------------------- puertas del contrato JSON
+
+
+def test_una_correccion_marcada_insegura_no_se_aplica(sin_efectos, monkeypatch) -> None:
+    """`safe_to_execute: false` es la única salvaguarda que el contrato le
+    da al agente para frenar un cambio irreversible. Ignorarla la anula."""
+    _con_respuesta(monkeypatch, respuesta(safe_to_execute=False, risk="HIGH"))
+    runner = _RunnerFalso(*[_fallo("x")] * 3)
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert len(runner.llamadas) == 1, "no debe reejecutar tras una corrección insegura"
+    assert not reparacion.intentos[0].aplicado
+    assert "NO segura" in reparacion.intentos[0].motivo_descarte
+    assert sin_efectos["guardado"] == {}, "no se escribió nada"
+
+
+def test_una_correccion_de_riesgo_alto_pide_revision_humana(sin_efectos, monkeypatch) -> None:
+    _con_respuesta(monkeypatch, respuesta(risk="HIGH"))
+    runner = _RunnerFalso(*[_fallo("x")] * 3)
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert not reparacion.intentos[0].aplicado
+    assert "riesgo ALTO" in reparacion.intentos[0].motivo_descarte
+
+
+def test_sin_safe_to_execute_se_asume_inseguro(sin_efectos, monkeypatch) -> None:
+    """La salvaguarda tiene que fallar cerrada: un campo ausente no puede
+    interpretarse como permiso."""
+    import json as _json
+
+    informe = _json.loads(respuesta().split("\n\n```python")[0])
+    del informe["proposed_correction"]["safe_to_execute"]
+    _con_respuesta(monkeypatch, _json.dumps(informe) + "\n\n```python\nX = 1\n```")
+    runner = _RunnerFalso(*[_fallo("x")] * 3)
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert not reparacion.intentos[0].aplicado
+
+
+def test_escalate_para_el_ciclo_y_lo_deja_marcado(sin_efectos, monkeypatch) -> None:
+    _con_respuesta(monkeypatch, respuesta(status="ESCALATE"))
+    runner = _RunnerFalso(*[_fallo("x")] * 5)
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert len(runner.llamadas) == 1
+    assert reparacion.escalada
+    assert "escaló" in reparacion.intentos[0].motivo_descarte
+
+
+def test_el_informe_del_agente_llega_entero_al_intento(sin_efectos, monkeypatch) -> None:
+    _con_respuesta(monkeypatch, RESPUESTA)
+    runner = _RunnerFalso(_fallo("x"), _exito())
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+    intento = reparacion.intentos[0]
+
+    assert intento.estado == "CORRECTION_PROPOSED"
+    assert intento.confianza == 85
+    assert intento.riesgo == "LOW"
+    assert intento.paso_fallido == "click_por_texto('1')"
+    assert intento.evidencia and "captura" in intento.evidencia[0]
+    assert intento.validacion == ["el display muestra 96"]
+    assert intento.aprendizaje["when_not_to_apply"]
+
+
+def test_un_json_roto_no_tumba_la_reparacion(sin_efectos, monkeypatch) -> None:
+    _con_respuesta(monkeypatch, "esto no es JSON ni de lejos")
+    runner = _RunnerFalso(*[_fallo("x")] * 3)
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert len(runner.llamadas) == 1
+    assert "contrato" in reparacion.intentos[0].motivo_descarte
+
+
+def test_una_confianza_absurda_se_acota(sin_efectos, monkeypatch) -> None:
+    _con_respuesta(monkeypatch, respuesta(confidence=999))
+    runner = _RunnerFalso(_fallo("x"), _exito())
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert reparacion.intentos[0].confianza == 100
+
+
+def test_el_agente_ve_lo_que_ya_se_intento(sin_efectos, monkeypatch) -> None:
+    """Sin esto el agente repite la misma corrección una y otra vez."""
+    cliente = _con_respuesta(monkeypatch, respuesta("A = 1"), respuesta("B = 2"))
+    runner = _RunnerFalso(_fallo("primer fallo"), _fallo("segundo fallo"), _exito())
+
+    Autocorrector(runner).ejecutar(_SpecFalso())
+
+    prompt = cliente.ultimo_prompt
+    assert "Intento 1:" in prompt
+    assert "glifo" in prompt, "debe contarle la causa raíz que ya se propuso"

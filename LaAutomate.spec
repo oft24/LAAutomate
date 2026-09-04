@@ -8,6 +8,8 @@ datas = [
     ('app/resources/app_icon.png', 'app/resources'),
     ('docs/GEMINI_SYSTEM_PROMPT.md', 'docs'),
     ('docs/PRACTICAS.md', 'docs'),
+    ('docs/PROMPT_OPTIMIZADOR.md', 'docs'),
+    ('docs/PROMPT_REPARACION.md', 'docs'),
     ('docs/arquitectura.md', 'docs'),
     ('docs/acciones.md', 'docs'),
     ('docs/logica-grabadora.md', 'docs'),

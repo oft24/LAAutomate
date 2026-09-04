@@ -109,6 +109,55 @@ El relato completo —por qué falló, últimas acciones, qué se cambió— apa
 en el chat del **Asistente IA**, con las capturas de cada intento
 adjuntas para poder seguir preguntando sobre ellas.
 
+## El contrato del agente de reparación
+
+El prompt vive en [`PROMPT_REPARACION.md`](PROMPT_REPARACION.md), **versionado
+en su primera línea** (`repair_prompt_vN`). Está en un archivo y no en el
+código para que se pueda mejorar sin tocar Python y volver atrás copiando un
+archivo.
+
+El agente responde JSON con estructura fija: `status`, `root_cause`,
+`confidence`, `evidence`, `proposed_correction` (con `risk` y
+`safe_to_execute`), `success_validation` y `learning_candidate`. Eso da tres
+puertas que un formato libre no daba:
+
+| Condición | Qué pasa |
+|---|---|
+| `status: "ESCALATE"` | El ciclo se detiene y se marca para revisión humana |
+| `safe_to_execute: false` | **No se aplica.** Es la única salvaguarda que el contrato le da al agente para frenar un cambio irreversible |
+| `safe_to_execute` ausente | Se trata como NO seguro: la salvaguarda falla cerrada |
+| `risk: "HIGH"` | No se aplica; pide revisión |
+
+Cada intento recibe además un resumen de los **anteriores** —qué causa raíz
+se propuso, si se aplicó, y con qué volvió a fallar— para que no repita una
+corrección que ya falló.
+
+## El optimizador de prompt
+
+Tras una reparación **validada**, [`PROMPT_OPTIMIZADOR.md`](PROMPT_OPTIMIZADOR.md)
+extrae la lección generalizable y produce una versión nueva del prompt de
+reparación. `engine/optimizador_prompt.py` lo gobierna con tres barandillas:
+
+1. **Solo se aprende de éxitos validados.** `update_prompt: false` es una
+   respuesta válida y la más común.
+2. **Nunca se sobrescribe una versión.** Cada una se archiva en
+   `docs/prompts/repair_prompt_vN.md`; el archivo activo es una copia.
+   Volver atrás es copiar un archivo. Cada cambio deja entrada en
+   [`PROMPT_CHANGELOG.md`](PROMPT_CHANGELOG.md).
+3. **El prompt del optimizador no se toca a sí mismo.** Un sistema que
+   reescribe las reglas con las que se juzga no tiene punto de apoyo.
+
+Y tres filtros automáticos sobre la versión propuesta:
+
+- Si crece más de un 60 %, se rechaza: generalizar debería resumir, no
+  acumular.
+- Si baja de 2 000 caracteres, se rechaza: le faltan secciones.
+- Si pierde *Reglas de seguridad*, *Salida obligatoria* o el campo
+  `"status"`, se rechaza. «Mejorar» no puede significar quedarse sin las
+  reglas de seguridad.
+
+Cuesta una llamada extra; se apaga con `Autocorrector(..., mejorar_prompt=False)`.
+
 ## Limitaciones
 
 - **No valida que el arreglo haga lo correcto**, solo que deje de fallar.

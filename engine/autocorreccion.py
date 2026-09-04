@@ -29,6 +29,7 @@ from pathlib import Path
 from core.config import LOGS_DIR
 from core.gemini_client import (
     ErrorGemini,
+    extraer_json,
     GeminiClient,
     es_modelo_de_texto,
     extraer_codigo_python,
@@ -42,6 +43,7 @@ from engine import practicas
 from engine.almacen import guardar_automatizacion, leer_codigo
 from engine.automation_base import AutomationResult
 from engine.bitacora import Bitacora
+from engine.optimizador_prompt import leer_prompt_reparacion, optimizar, version_actual
 from engine.registry import AutomationSpec, obtener
 
 logger = get_logger(__name__)
@@ -57,15 +59,28 @@ CARPETA_REPARACIONES = LOGS_DIR / "reparaciones"
 
 @dataclass
 class Intento:
-    """Un ciclo fallo → diagnóstico → arreglo."""
+    """Un ciclo fallo → diagnóstico → arreglo, con el veredicto del agente."""
 
     numero: int
     error: str
     acciones: str
     capturas: list[Path] = field(default_factory=list)
-    diagnostico: str = ""
+    # Del contrato JSON del agente de reparación (docs/PROMPT_REPARACION.md)
+    estado: str = ""              # DIAGNOSED | CORRECTION_PROPOSED | ... | ESCALATE
+    paso_fallido: str = ""
+    estado_esperado: str = ""
+    estado_real: str = ""
+    diagnostico: str = ""         # root_cause
+    confianza: int = 0
+    evidencia: list[str] = field(default_factory=list)
     cambios: list[str] = field(default_factory=list)
-    practica: str = ""
+    riesgo: str = ""
+    seguro: bool = True
+    validacion: list[str] = field(default_factory=list)
+    evitar_duplicados: list[str] = field(default_factory=list)
+    practica: str = ""            # learning_candidate resumido
+    aprendizaje: dict = field(default_factory=dict)
+    resumen_humano: str = ""
     codigo_propuesto: str = ""
     aplicado: bool = False
     motivo_descarte: str = ""
@@ -80,6 +95,8 @@ class Reparacion:
     resultado: AutomationResult | None = None
     codigo_original: str = ""
     carpeta: Path | None = None
+    version_prompt: str = ""
+    escalada: bool = False
 
     @property
     def exito(self) -> bool:
@@ -114,6 +131,7 @@ class Autocorrector:
         modelo: str | None = None,
         max_intentos: int = MAX_INTENTOS,
         on_progreso=None,
+        mejorar_prompt: bool = True,
     ) -> None:
         self.runner = runner
         self.modelo = modelo
@@ -122,10 +140,16 @@ class Autocorrector:
         # primera vez que hacen falta, no en el constructor: construir un
         # Autocorrector no deberia costar una llamada de red.
         self._reservas: list[str] | None = None
+        # Los intentos de ESTA sesion, para poder contarle al agente que se
+        # probo ya y que no repita una correccion que fallo.
+        self._intentos_de_esta_sesion: list[Intento] = []
         # Callback opcional (texto -> None) para ir contando lo que pasa
         # mientras pasa: una reparación tarda minutos y el silencio es
         # indistinguible de un cuelgue.
         self.on_progreso = on_progreso
+        # Mejorar el prompt cuesta una llamada extra. Se puede apagar para
+        # una reparacion puntual sin gastarla.
+        self.mejorar_prompt = mejorar_prompt
 
     # ------------------------------------------------------------ público
 
@@ -133,6 +157,8 @@ class Autocorrector:
         nombre = spec.nombre
         reparacion = Reparacion(automatizacion=nombre, codigo_original=leer_codigo(nombre))
         reparacion.carpeta = self._carpeta_de_sesion(nombre)
+        reparacion.version_prompt = version_actual()
+        self._intentos_de_esta_sesion = reparacion.intentos
 
         for numero in range(1, self.max_intentos + 1):
             etiqueta = "" if numero == 1 else f"_intento{numero}"
@@ -147,6 +173,7 @@ class Autocorrector:
                     "Funcionó." if numero == 1 else f"Funcionó tras {numero - 1} arreglo(s)."
                 )
                 self._recordar_lo_aprendido(reparacion)
+                self._mejorar_el_prompt(reparacion)
                 return reparacion
 
             intento = Intento(
@@ -168,6 +195,7 @@ class Autocorrector:
 
             self._contar(f"Falló: {resultado.message[:120]}  →  pidiendo un arreglo…")
             if not self._reparar(nombre, intento):
+                reparacion.escalada = intento.estado == "ESCALATE"
                 break
 
             spec = obtener(nombre)  # el módulo se recargó: hay que releer el spec
@@ -178,29 +206,57 @@ class Autocorrector:
     # ------------------------------------------------------------ privado
 
     def _reparar(self, nombre: str, intento: Intento) -> bool:
-        """Pide el arreglo, lo valida y lo guarda. False = no seguir."""
+        """Pide el diagnóstico, lo valida y aplica el arreglo. False = parar."""
         codigo_actual = leer_codigo(nombre)
-        prompt = self._prompt(nombre, codigo_actual, intento)
         try:
-            respuesta = self._preguntar(prompt, intento.capturas)
+            respuesta = self._preguntar(self._prompt(nombre, codigo_actual, intento), intento.capturas)
         except ErrorGemini as exc:
             intento.motivo_descarte = f"Gemini no pudo responder: {exc}"
             self._contar(intento.motivo_descarte)
             return False
 
-        intento.diagnostico = self._seccion(respuesta, "DIAGNOSTICO")
-        intento.practica = self._seccion(respuesta, "PRACTICA")
-        propuesto = extraer_codigo_python(respuesta)
+        try:
+            informe = extraer_json(respuesta)
+        except ValueError as exc:
+            intento.motivo_descarte = f"el agente no devolvió el JSON del contrato: {exc}"
+            self._contar(intento.motivo_descarte)
+            return False
 
+        self._volcar_informe(intento, informe)
+
+        # --- puertas de seguridad del contrato ---------------------------
+        if intento.estado == "ESCALATE":
+            intento.motivo_descarte = "el agente escaló el incidente para revisión humana"
+            self._contar(f"Escalado: {intento.diagnostico or intento.resumen_humano}")
+            return False
+
+        if not intento.seguro:
+            # El propio agente marcó la corrección como no segura. Aplicarla
+            # de todas formas anularía la única salvaguarda que el contrato
+            # le da para frenar cambios irreversibles.
+            intento.motivo_descarte = (
+                f"el agente marcó la corrección como NO segura (riesgo {intento.riesgo or 'sin declarar'})"
+            )
+            self._contar(intento.motivo_descarte + ": no se aplica")
+            return False
+
+        if intento.riesgo.upper() == "HIGH":
+            intento.motivo_descarte = "corrección de riesgo ALTO: requiere revisión humana"
+            self._contar(intento.motivo_descarte)
+            return False
+
+        propuesto = extraer_codigo_python(respuesta)
         if not propuesto:
-            intento.motivo_descarte = "la respuesta no traía ningún bloque de código"
+            if intento.estado == "DIAGNOSED":
+                intento.motivo_descarte = "el agente diagnosticó pero no propuso código"
+            else:
+                intento.motivo_descarte = "la respuesta no traía ningún bloque de código"
             self._contar(intento.motivo_descarte)
             return False
 
         intento.codigo_propuesto = propuesto
 
         if propuesto.strip() == codigo_actual.strip():
-            # Insistir con un arreglo que no cambia nada solo gasta cuota.
             intento.motivo_descarte = "el arreglo era idéntico al código actual"
             self._contar("El modelo devolvió el mismo código: no tiene sentido reintentar.")
             return False
@@ -214,9 +270,59 @@ class Autocorrector:
             return False
 
         intento.aplicado = True
-        intento.cambios = self._lineas(self._seccion(respuesta, "CAMBIOS"))
-        self._contar(f"Arreglo aplicado: {intento.diagnostico[:140] or 'sin diagnóstico'}")
+        self._contar(
+            f"Arreglo aplicado (riesgo {intento.riesgo or 'n/d'}, confianza {intento.confianza}%): "
+            f"{intento.diagnostico[:140] or 'sin causa raíz'}"
+        )
         return True
+
+    @staticmethod
+    def _volcar_informe(intento: Intento, informe: dict) -> None:
+        """Pasa el JSON del contrato al Intento, sin confiar en los tipos.
+
+        El modelo puede devolver una cadena donde el contrato pide una
+        lista, o al revés. Normalizar aquí evita que un `.join()` reviente
+        a mitad de una reparación que por lo demás iba bien.
+        """
+
+        def lista(valor) -> list[str]:
+            if isinstance(valor, list):
+                return [str(v) for v in valor if str(v).strip()]
+            return [str(valor)] if str(valor or "").strip() else []
+
+        correccion = informe.get("proposed_correction") or {}
+        if not isinstance(correccion, dict):
+            correccion = {}
+        reejecucion = informe.get("reexecution") or {}
+        if not isinstance(reejecucion, dict):
+            reejecucion = {}
+        aprendizaje = informe.get("learning_candidate") or {}
+        if not isinstance(aprendizaje, dict):
+            aprendizaje = {}
+
+        intento.estado = str(informe.get("status", "")).strip().upper()
+        intento.paso_fallido = str(informe.get("failed_step", ""))
+        intento.estado_esperado = str(informe.get("expected_state", ""))
+        intento.estado_real = str(informe.get("actual_state", ""))
+        intento.diagnostico = str(informe.get("root_cause", ""))
+        intento.evidencia = lista(informe.get("evidence"))
+        intento.resumen_humano = str(informe.get("human_summary", ""))
+        intento.validacion = lista(informe.get("success_validation"))
+        intento.evitar_duplicados = lista(reejecucion.get("avoid_duplicate_actions"))
+        intento.cambios = lista(correccion.get("changes")) or lista(correccion.get("description"))
+        intento.riesgo = str(correccion.get("risk", "")).strip().upper()
+        intento.aprendizaje = {k: str(v) for k, v in aprendizaje.items()}
+        intento.practica = str(aprendizaje.get("successful_strategy") or "").strip()
+
+        try:
+            intento.confianza = max(0, min(100, int(float(informe.get("confidence", 0) or 0))))
+        except (TypeError, ValueError):
+            intento.confianza = 0
+
+        # `safe_to_execute` ausente se trata como NO seguro: la salvaguarda
+        # debe fallar cerrada, no abierta.
+        seguro = correccion.get("safe_to_execute")
+        intento.seguro = bool(seguro) if seguro is not None else False
 
     def _preguntar(self, prompt: str, capturas) -> str:
         """Pide el arreglo, cambiando de modelo si el elegido se satura.
@@ -300,15 +406,39 @@ class Autocorrector:
             logger.exception("No se pudo restaurar %s tras un arreglo fallido", nombre)
 
     def _prompt(self, nombre: str, codigo: str, intento: Intento) -> str:
+        """Compone la petición a partir del prompt versionado.
+
+        La plantilla vive en `docs/PROMPT_REPARACION.md` y lleva su número
+        de versión dentro. Está en un archivo y no aquí para que el
+        optimizador pueda mejorarla sin tocar código, y para que se pueda
+        volver a una versión anterior copiando un archivo.
+        """
+        plantilla = leer_prompt_reparacion()
+        anteriores = self._resumen_intentos_previos(intento.numero)
+
+        plantilla = (
+            plantilla.replace("{{MAX_REPAIR_ATTEMPTS}}", str(self.max_intentos))
+            .replace("{{CURRENT_ATTEMPT}}", str(intento.numero))
+            .replace("{{PREVIOUS_ATTEMPTS}}", anteriores)
+        )
+
         partes = [
-            f"La automatización «{nombre}» falló al ejecutarse. Repárala.",
+            plantilla,
+            "",
+            "---",
+            "",
+            "# INCIDENTE",
+            "",
+            f"Automatización: {nombre}",
+            f"Momento: {datetime.now():%Y-%m-%d %H:%M:%S}",
+            f"Intento {intento.numero} de {self.max_intentos}",
             "",
             "## Error",
             "```",
             intento.error[:2000],
             "```",
             "",
-            "## Qué estaba haciendo (bitácora de acciones)",
+            "## Bitácora de acciones (qué estaba haciendo)",
             "```",
             intento.acciones[:4000],
             "```",
@@ -318,49 +448,40 @@ class Autocorrector:
             codigo.rstrip(),
             "```",
         ]
+
         if intento.capturas:
             partes += [
                 "",
-                "## Captura del momento del fallo",
-                "La imagen adjunta es la pantalla en el instante exacto del error. "
-                "Úsala para ver qué había realmente delante: qué ventana estaba al "
-                "frente, si apareció un diálogo inesperado, o si el control que se "
-                "buscaba se llama distinto de lo que el código supone.",
+                "## Capturas",
+                f"Se adjuntan {len(intento.capturas)} captura(s) en orden cronológico: "
+                "la primera es la más antigua y la última la más cercana al fallo.",
             ]
+        else:
+            partes += ["", "## Capturas", "No hay ninguna captura de esta ejecución."]
 
         aprendido = practicas.leer()
         if aprendido:
             partes += ["", "## Prácticas ya aprendidas en este proyecto", aprendido]
 
-        partes += [
-            "",
-            "## Cómo responder",
-            "Responde EXACTAMENTE con estas cuatro secciones, en este orden:",
-            "",
-            "DIAGNOSTICO: la causa REAL en una o dos frases (no el síntoma).",
-            "CAMBIOS: una línea por cada cambio que hiciste.",
-            "PRACTICA: UNA regla accionable y general que evitaría este fallo en el "
-            "futuro, en una sola frase. Si no aprendiste nada nuevo, escribe «ninguna».",
-            "",
-            "Y después un único bloque ```python con el archivo automation.py COMPLETO "
-            "y corregido. Conserva el nombre en @registrar, el nombre de la clase y "
-            "todo lo que ya funcionaba: cambia lo mínimo necesario.",
-        ]
         return "\n".join(partes)
 
-    @staticmethod
-    def _seccion(texto: str, etiqueta: str) -> str:
-        """Saca el contenido de una sección con nombre de la respuesta.
-
-        Tolerante a propósito: el modelo puede escribir «DIAGNOSTICO:»,
-        «**DIAGNOSTICO**:» o ponerlo como encabezado. Exigir un formato
-        exacto haría fallar la reparación por un asterisco.
-        """
-        import re
-
-        patron = rf"[*#\s]*{etiqueta}[*\s]*:?\s*(.+?)(?=\n[*#\s]*(?:DIAGNOSTICO|CAMBIOS|PRACTICA)\b|\n```|$)"
-        encontrado = re.search(patron, texto, re.IGNORECASE | re.DOTALL)
-        return " ".join(encontrado.group(1).split()) if encontrado else ""
+    def _resumen_intentos_previos(self, numero_actual: int) -> str:
+        """Lo que ya se intentó, para que el agente no lo repita."""
+        previos = [i for i in self._intentos_de_esta_sesion if i.numero < numero_actual]
+        if not previos:
+            return "(ninguno: este es el primer intento)"
+        lineas = []
+        for intento in previos:
+            lineas.append(
+                f"- Intento {intento.numero}: causa raíz propuesta «{intento.diagnostico or 'ninguna'}» "
+                f"(confianza {intento.confianza}%, riesgo {intento.riesgo or 'n/d'}). "
+                + (
+                    f"Se aplicó y volvió a fallar con: {intento.error[:200]}"
+                    if intento.aplicado
+                    else f"NO se aplicó: {intento.motivo_descarte}"
+                )
+            )
+        return "\n".join(lineas)
 
     @staticmethod
     def _lineas(texto: str) -> list[str]:
@@ -407,6 +528,49 @@ class Autocorrector:
         except OSError:
             pass
 
+    def _mejorar_el_prompt(self, reparacion: Reparacion) -> None:
+        """Pide una version mejorada del prompt tras un exito validado.
+
+        Solo se lanza cuando la reparacion FUNCIONO: el contrato del
+        optimizador es explicito en que aprender de algo no verificado es
+        peor que no aprender. Y nunca rompe nada -- si el optimizador falla
+        o decide que no hay nada generalizable, la reparacion sigue siendo
+        exitosa igual.
+        """
+        if not self.mejorar_prompt or not reparacion.reparada:
+            return
+        exitoso = next((i for i in reversed(reparacion.intentos) if i.aplicado), None)
+        if exitoso is None:
+            return
+
+        fallidos = [
+            f"Intento {i.numero}: {i.diagnostico or 'sin causa raíz'} — {i.motivo_descarte or 'se aplicó y volvió a fallar'}"
+            for i in reparacion.intentos
+            if i is not exitoso
+        ]
+        try:
+            resultado = optimizar(
+                incidente=f"{reparacion.automatizacion}: {exitoso.paso_fallido or 'paso desconocido'}",
+                error_original=exitoso.error[:1500],
+                analisis_capturas="; ".join(exitoso.evidencia)[:1500],
+                intentos_fallidos="\n".join(fallidos) or "(ninguno)",
+                correccion_exitosa="; ".join(exitoso.cambios)[:1500],
+                validacion="La automatización volvió a ejecutarse completa y devolvió success=True. "
+                + ("Validaciones declaradas: " + "; ".join(exitoso.validacion) if exitoso.validacion else ""),
+                modelo=self.modelo,
+            )
+        except Exception as exc:  # noqa: BLE001 - optimizar es opcional
+            logger.info("El optimizador de prompt no pudo ejecutarse: %s", exc)
+            return
+
+        if resultado.actualizado:
+            self._contar(
+                f"Prompt de reparación mejorado: {resultado.version_anterior} → {resultado.version_nueva}"
+                f" ({resultado.regla[:120]})"
+            )
+        else:
+            logger.info("El prompt no cambia: %s", resultado.motivo)
+
     def _recordar_lo_aprendido(self, reparacion: Reparacion) -> None:
         """Anota en PRACTICAS.md lo que se aprendió, si la reparación sirvió.
 
@@ -419,6 +583,12 @@ class Autocorrector:
         for intento in reversed(reparacion.intentos):
             if not intento.aplicado or not intento.practica:
                 continue
+            # Se antepone cuando aplicarla: una regla sin contexto se
+            # convierte en un habito que el modelo usa donde no toca.
+            if intento.aprendizaje.get("when_to_apply"):
+                intento.practica = (
+                    f"{intento.practica} (aplícala cuando: {intento.aprendizaje['when_to_apply']})"
+                )
             if intento.practica.strip().lower().startswith("ninguna"):
                 continue
             if practicas.anotar(intento.practica, reparacion.automatizacion, intento.error):

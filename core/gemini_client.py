@@ -116,6 +116,38 @@ def extraer_codigo_python(texto: str) -> str | None:
     return None
 
 
+def extraer_json(texto: str) -> dict:
+    """Lee el objeto JSON de una respuesta, aunque venga con cerca markdown.
+
+    Los agentes con contrato (reparacion, optimizador) responden JSON. No
+    todos los modelos respetan igual el "sin markdown alrededor", y perder
+    una reparacion entera por tres caracteres de mas seria absurdo: se
+    tolera la cerca y, en ultimo caso, se busca el primer objeto {...}.
+    """
+    limpio = (texto or "").strip()
+    if limpio.startswith("```"):
+        limpio = limpio.split("\n", 1)[-1].removesuffix("```").strip()
+        if limpio.startswith("json"):
+            limpio = limpio[4:].strip()
+
+    import json as _json
+
+    try:
+        datos = _json.loads(limpio)
+    except _json.JSONDecodeError:
+        inicio, fin = limpio.find("{"), limpio.rfind("}")
+        if inicio == -1 or fin <= inicio:
+            raise ValueError("la respuesta no contiene JSON") from None
+        try:
+            datos = _json.loads(limpio[inicio : fin + 1])
+        except _json.JSONDecodeError as exc:
+            raise ValueError(f"el JSON de la respuesta no se puede leer: {exc}") from None
+
+    if not isinstance(datos, dict):
+        raise ValueError("la respuesta trae JSON, pero no un objeto con campos")
+    return datos
+
+
 def construir_contexto_proyecto(nombre_automatizacion: str | None = None) -> str:
     """Contexto versionado para Gemini; nunca incluye .env, logs ni secretos."""
     partes = [
