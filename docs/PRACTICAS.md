@@ -89,6 +89,45 @@ Un doble tiene que respetar el **contrato** del objeto real —los tipos que
 devuelve, las excepciones que lanza— aunque cueste tres líneas más. Si no,
 lo que se prueba es el doble.
 
+### Una celda vacía de Excel llega como la palabra «nan»
+
+pandas devuelve `float("nan")` para una celda vacía, y `str(nan)` es la
+cadena `"nan"`. Sin filtrarlo, esa palabra viaja como si fuera un dato.
+
+Medido: la búsqueda de YouTube consultó literalmente
+`"automatización con python nan"`. El mismo `normalizar` estaba en la
+automatización del CURP, donde habría mandado `"nan"` como segundo apellido
+a un servicio oficial.
+
+No da error. Da datos silenciosamente equivocados, que es peor.
+
+```python
+if isinstance(valor, float) and valor != valor:   # NaN != NaN
+    return ""
+```
+
+### `.text` de Selenium miente; `textContent` no
+
+`.text` solo devuelve el texto que Selenium considera **renderizado**. En
+elementos recortados, con `overflow` o dentro de componentes web, devuelve
+`""` aunque el texto esté en el DOM.
+
+Comprobado en los resultados de YouTube: el nombre del canal salía vacío en
+todas las filas con cinco selectores distintos; `get_attribute("textContent")`
+devolvía el valor correcto con todos ellos.
+
+Lee `textContent` primero y usa `.text` como reserva.
+
+### Espera al elemento, no al reloj
+
+Consultar el DOM antes de que la página termine de pintar devuelve cero
+resultados, y eso se lee como «no encontré nada» cuando en realidad no
+había mirado todavía. Pasó buscando en YouTube: el primer intento reportó
+0 vídeos con selectores que sí eran correctos.
+
+`self.web` ya espera al elemento en `click`, `escribir` y `leer_texto`. Usa
+uno de ellos como puerta antes de leer en bloque con `find_elements`.
+
 ### Valida las filas antes de salir a la red
 
 Descubrir en la fila 300 que el estado estaba mal escrito, con 299

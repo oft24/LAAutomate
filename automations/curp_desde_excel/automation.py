@@ -91,7 +91,21 @@ def _sin_acentos(texto: str) -> str:
 
 
 def normalizar(valor) -> str:
-    return "" if valor is None else str(valor).strip()
+    """Texto limpio de una celda, tratando el vacio de Excel como vacio.
+
+    Una celda vacia llega desde pandas como `float("nan")`, y `str(nan)`
+    es la cadena "nan". Sin este filtro, esa palabra viaja como dato: la
+    busqueda de YouTube acabo consultando literalmente "automatizacion con
+    python nan", y en la del CURP se habria mandado "nan" como segundo
+    apellido a un servicio oficial.
+    """
+    if valor is None:
+        return ""
+    # NaN es el unico valor que no es igual a si mismo.
+    if isinstance(valor, float) and valor != valor:
+        return ""
+    texto = str(valor).strip()
+    return "" if texto.lower() == "nan" else texto
 
 
 def clave_sexo(valor) -> str:
