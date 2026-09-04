@@ -12,6 +12,7 @@ Elige la fila que describe lo que quieres hacer y sigue esa ruta en orden.
 | **Escribir mi primera automatización** | [`escribir-automatizaciones.md`](escribir-automatizaciones.md) → [`acciones.md`](acciones.md) |
 | **Saber qué puede hacer `self.web`, `self.escritorio`…** | [`acciones.md`](acciones.md) |
 | **Grabar un proceso en vez de escribirlo** | [`escribir-automatizaciones.md` § La grabadora](escribir-automatizaciones.md#la-grabadora) → [`logica-grabadora.md`](logica-grabadora.md) |
+| **Crear código desde una descripción y capturas** | [`asistente-ia.md`](asistente-ia.md) → [`acciones.md`](acciones.md) |
 | **Entender cómo encaja todo por dentro** | [`arquitectura.md`](arquitectura.md) → [`logica-grabadora.md`](logica-grabadora.md) |
 | **Tocar el código del proyecto** | [`arquitectura.md`](arquitectura.md) → [`desarrollo.md`](desarrollo.md) |
 | **Entregar la app a alguien más** | [`empaquetado.md`](empaquetado.md) |
@@ -31,8 +32,11 @@ Ordenados de "para usar" a "para mantener".
 
 | Documento | Qué responde |
 |---|---|
+| [Autocorrección](autocorreccion.md) | Qué pasa cuando una automatización falla: bitácora, capturas por intento, los 5 reintentos y cómo aprende. |
+| [Prácticas aprendidas](PRACTICAS.md) | La memoria del autocorrector; se inyecta en cada reparación. |
 | [Arquitectura](arquitectura.md) | Cómo encajan registry, runner, scheduler, acciones y core. Dónde vive cada dato. |
 | [Lógica de la Grabadora](logica-grabadora.md) | Flujo Web/Escritorio, máquina de estados, cómo se decide qué se graba y qué no, y las limitaciones conocidas. |
+| [Asistente IA con Gemini](asistente-ia.md) | Qué contexto se envía, cómo se protege la API key y cómo una respuesta se convierte en borrador revisable. |
 
 ### Mantenimiento
 
@@ -40,6 +44,7 @@ Ordenados de "para usar" a "para mantener".
 |---|---|
 | [Desarrollo](desarrollo.md) | Estructura del repo, cómo correr las pruebas, convenciones, deuda conocida. |
 | [Empaquetado e instalación](empaquetado.md) | Generar el `.exe` y el instalador, y cómo cambian las rutas al empaquetar. |
+| [Prompt del sistema de Gemini](GEMINI_SYSTEM_PROMPT.md) | Contrato versionado que limita cómo el modelo puede proponer automatizaciones. |
 
 ### Histórico
 

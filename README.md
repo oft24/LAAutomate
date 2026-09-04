@@ -31,7 +31,8 @@ Python + PySide6 + Selenium + pywinauto. Windows.
 | **Grabadora** | Graba clicks y teclas —en el navegador o en apps de escritorio— y genera el código Python de la automatización. Sigue las pestañas que se abren y, si se le pide, varias ventanas. Nunca graba contraseñas. |
 | **Historial** | Cada corrida queda en SQLite: éxito/fallo, mensaje, duración. Visible en el panel principal. |
 | **Bóveda de credenciales** | Usuarios y contraseñas en el Almacén de credenciales de Windows vía `keyring`, nunca en el código ni en la base de datos. |
-| **App de escritorio** | PySide6, 7 vistas: Panel principal, Automatizaciones, Grabadora, Programador, Registros, Bóveda y Wiki. |
+| **Asistente IA** | Chat multimodal con Gemini: combina instrucciones, capturas y la documentación real para proponer `automation.py`; la persona revisa y confirma antes de guardar. |
+| **App de escritorio** | PySide6, 8 vistas: Panel principal, Automatizaciones, Grabadora, Programador, Asistente IA, Registros, Bóveda y Wiki. |
 
 ## Instalar
 
@@ -94,6 +95,7 @@ que quieras hacer. Los documentos, uno por uno:
 |---|---|
 | [Arquitectura](docs/arquitectura.md) | Cómo encajan registry, runner, scheduler, acciones y core. Dónde vive cada dato. |
 | [Lógica de la Grabadora](docs/logica-grabadora.md) | Flujo Web/Escritorio, estados, diagnóstico de escritura y criterios de corrección. |
+| [Asistente IA](docs/asistente-ia.md) | Gemini, capturas, contexto, almacenamiento seguro de la clave y creación supervisada de código. |
 | [Escribir automatizaciones](docs/escribir-automatizaciones.md) | La clase base, los disparadores, credenciales, la grabadora, errores comunes. |
 | [Referencia de acciones](docs/acciones.md) | Todos los métodos de `self.web`, `.excel`, `.http`, `.correo`, `.escritorio`, `.copiloto`. |
 | [Empaquetado e instalación](docs/empaquetado.md) | Generar el `.exe`, el instalador y cómo cambian las rutas al empaquetar. |

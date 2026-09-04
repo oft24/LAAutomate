@@ -22,7 +22,10 @@ class PageHeader(QWidget):
         layout.setSpacing(ESPACIADO.lg)
 
         columna_texto = QVBoxLayout()
-        columna_texto.setSpacing(2)
+        columna_texto.setSpacing(3)
+        contexto_lbl = QLabel(f"//  {titulo.upper()}")
+        contexto_lbl.setObjectName("pageEyebrow")
+        columna_texto.addWidget(contexto_lbl)
         titulo_lbl = QLabel(titulo)
         titulo_lbl.setObjectName("pageTitle")
         columna_texto.addWidget(titulo_lbl)

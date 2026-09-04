@@ -106,7 +106,7 @@ class EstadoGrabacion(QFrame):
 
     def _pintar_borde(self, hay_avisos: bool) -> None:
         color = COLORES.ocre if hay_avisos else COLORES.borde
-        fondo = "#FFFDF9" if hay_avisos else COLORES.tarjeta
+        fondo = COLORES.ocre_suave if hay_avisos else COLORES.tarjeta
         self.setStyleSheet(
             f"QFrame#tarjeta {{ background-color: {fondo}; border: 1px solid {color};"
             f" border-radius: {RADIOS.tarjeta}px; }}"

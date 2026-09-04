@@ -34,7 +34,7 @@ pytest -m "not network and not navegador"   # sin navegador de ningún tipo
 pytest tests/test_runner_failure.py -v
 ```
 
-~140 pruebas. Casi todas corren con el escritorio y el navegador **mockeados**: no
+~190 pruebas. Casi todas corren con el escritorio y el navegador **mockeados**: no
 abren ventanas, no mueven el mouse y no tocan Outlook. Dos marcadores acotan las
 que sí necesitan algo del entorno (ambos declarados en `pytest.ini`):
 
@@ -66,6 +66,7 @@ Dónde está cubierto qué:
 | `test_copilot_teams.py` | Lectura y copiado de tablas de Copilot, envío en Teams. |
 | `test_vault.py` | Bóveda de credenciales sobre `keyring`. |
 | `test_workers.py` | El hilo Qt y la cancelación. |
+| `test_gemini_client.py` | Payload multimodal, clave fuera de la URL y validación del código sugerido. |
 
 Cuando arregles un caso borde de la grabadora, la prueba correspondiente documenta
 *por qué* está ese código: casi todas nombran el comportamiento roto que las originó.
@@ -91,6 +92,7 @@ core/
 ├── logger.py           un archivo de log por automatización
 ├── database.py         historial en SQLite
 ├── vault.py            credenciales vía keyring
+├── gemini_client.py    chat multimodal; contexto y capturas sin depender de la UI
 └── notifier.py         alerta a Teams/Slack por webhook cuando algo falla
 automations/            código del usuario
 instalador/             INSTALL.bat / UNINSTALL.bat

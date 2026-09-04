@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.empty_state import EmptyState
 from app.widgets.page_header import PageHeader
+from app.widgets.python_highlighter import PythonHighlighter
 from app.workers import AutomationWorker
 from core.vault import Vault
 from engine.registry import AutomationSpec, eliminar as eliminar_del_registro, listar, obtener
@@ -90,6 +91,7 @@ class AutomationsView(QWidget):
         self.editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.editor.setTabStopDistance(28)
         self.editor.textChanged.connect(self._marcar_sin_guardar)
+        self._resaltador = PythonHighlighter(self.editor.document())
         columna_editor.addWidget(self.editor)
         fila_superior.addLayout(columna_editor, stretch=1)
 
@@ -157,12 +159,12 @@ class AutomationsView(QWidget):
     def _ir_a_grabadora(self) -> None:
         ventana = self.window()
         if hasattr(ventana, "sidebar"):
-            ventana.sidebar.establecer_indice(2)
+            ventana.sidebar.establecer_vista("grabadora")
 
     def _ir_a_boveda(self) -> None:
         ventana = self.window()
         if hasattr(ventana, "sidebar"):
-            ventana.sidebar.establecer_indice(5)
+            ventana.sidebar.establecer_vista("boveda")
 
     def _filtrar_lista(self, texto: str) -> None:
         consulta = texto.strip().lower()
@@ -291,8 +293,25 @@ class AutomationsView(QWidget):
 
         self._worker = AutomationWorker(self.runner, spec)
         self._worker.log_line.connect(self.consola.appendPlainText)
+        self._worker.reparado.connect(self._al_reparar)
         self._worker.finalizado.connect(lambda resultado: self._al_finalizar(spec.nombre, resultado))
         self._worker.start()
+
+    def _al_reparar(self, reparacion) -> None:
+        """Recarga el codigo que la reparacion dejo y lo cuenta en el chat.
+
+        Recargar importa: si el autocorrector cambio el archivo, el editor
+        estaria enseniando una version que ya no es la que hay en disco --
+        y el siguiente "Guardar" la pisaria con la vieja, deshaciendo el
+        arreglo sin que nadie se entere.
+        """
+        if any(i.aplicado for i in reparacion.intentos):
+            self._cargar_codigo(self.lista.currentRow())
+
+        ventana = self.window()
+        vista = getattr(ventana, "assistant_view", None)
+        if vista is not None:
+            vista.mostrar_reparacion(reparacion)
 
     def _cancelar_ejecucion(self) -> None:
         if self._worker is None:

@@ -66,20 +66,35 @@ def _esta_dormida(hwnd: int) -> bool:
         return False
 
 
-def _despertar_ventana(titulo_regex: str | None = None, clase: str | None = None) -> int | None:
-    """Restaura una ventana que UI Automation no puede ver y devuelve su HWND.
+def _hwnds_que_coinciden(
+    titulo_regex: str | None = None, clase: str | None = None, solo_visibles: bool = False
+) -> list[int]:
+    """HWNDs cuyo titulo/clase hacen match, via EnumWindows de Win32.
 
-    La busqueda se hace con EnumWindows de Win32, que SI ve las ventanas
-    minimizadas y cloaked que UIA esconde. Si la encuentra dormida, la
-    restaura y la trae al frente para que UIA vuelva a enumerarla.
+    EnumWindows ve TODAS las ventanas -- incluidas las minimizadas y las
+    'cloaked' que UI Automation esconde -- y es instantaneo. El match del
+    titulo se hace con re.match, el mismo criterio que `title_re` de
+    pywinauto.
 
-    Devuelve None si no hay ninguna ventana que haga match -- ahi el
-    problema no es que este dormida, es que la app no esta abierta.
+    `solo_visibles` acota a lo que pywinauto consideraria: sus busquedas
+    van con visible_only/enabled_only/top_level_only, asi que sin este
+    filtro esta funcion encuentra MAS ventanas que el (fantasmas
+    invisibles, y las CoreWindow hijas que una app UWP cuelga de su
+    ApplicationFrameWindow con el mismo titulo). Se midio con la
+    Calculadora: sin filtrar salian 3 "Calculadora" y con filtro 1, que es
+    la real. `_despertar_ventana` NO lo usa a proposito -- ahi el objetivo
+    es justamente la ventana dormida que ya nadie ve.
     """
     candidatas: list[int] = []
 
     def _revisar(hwnd, _):
         try:
+            if solo_visibles and not (
+                win32gui.IsWindowVisible(hwnd)
+                and win32gui.IsWindowEnabled(hwnd)
+                and not win32gui.GetParent(hwnd)
+            ):
+                return True
             if titulo_regex is not None:
                 if not re.match(titulo_regex, win32gui.GetWindowText(hwnd) or ""):
                     return True
@@ -95,7 +110,55 @@ def _despertar_ventana(titulo_regex: str | None = None, clase: str | None = None
     try:
         win32gui.EnumWindows(_revisar, None)
     except Exception:
+        return []
+    return candidatas
+
+
+def _conectar_rapido(titulo_regex: str | None = None, clase: str | None = None):
+    """Conecta por HANDLE en vez de por titulo/clase, cuando se puede.
+
+    `Application(backend="uia").connect(title_re=...)` hace que UIA recorra
+    el escritorio entero buscando la ventana. En un equipo con muchas
+    ventanas abiertas eso no es lento: se CUELGA. Medido en una maquina con
+    389 ventanas de nivel superior (25 visibles con titulo):
+
+        connect(handle=hwnd)             0.0 s
+        connect(title_re="Calculadora")  no volvio en 2 minutos
+
+    Y ese cuelgue es especialmente malo aqui: el boton "Cancelar" de la
+    interfaz inyecta una excepcion con PyThreadState_SetAsyncExc, que solo
+    surte efecto en el siguiente bytecode de Python -- dentro de una
+    llamada C larga como esta no se puede interrumpir (ver app/workers.py).
+    El usuario se queda con una automatizacion congelada y sin salida.
+
+    Solo se usa el atajo cuando hay EXACTAMENTE una ventana que coincide.
+    Con varias, se deja pasar al camino de siempre para que pywinauto
+    lance su ElementAmbiguousError como hasta ahora, en vez de que este
+    codigo elija una por su cuenta y haga clicks en la ventana equivocada.
+    Devuelve None si no puede, y entonces el que llama sigue como antes.
+    """
+    from pywinauto import Application
+
+    candidatas = _hwnds_que_coinciden(titulo_regex, clase, solo_visibles=True)
+    if len(candidatas) != 1:
         return None
+    try:
+        return Application(backend="uia").connect(handle=candidatas[0], timeout=5), candidatas[0]
+    except Exception:
+        return None
+
+
+def _despertar_ventana(titulo_regex: str | None = None, clase: str | None = None) -> int | None:
+    """Restaura una ventana que UI Automation no puede ver y devuelve su HWND.
+
+    La busqueda se hace con EnumWindows de Win32, que SI ve las ventanas
+    minimizadas y cloaked que UIA esconde. Si la encuentra dormida, la
+    restaura y la trae al frente para que UIA vuelva a enumerarla.
+
+    Devuelve None si no hay ninguna ventana que haga match -- ahi el
+    problema no es que este dormida, es que la app no esta abierta.
+    """
+    candidatas = _hwnds_que_coinciden(titulo_regex, clase)
     if not candidatas:
         return None
 
@@ -123,23 +186,97 @@ class DesktopActions:
         si no la encuentra, lanza `comando` y espera a que aparezca."""
         from pywinauto import Application
 
-        try:
-            self._app = Application(backend="uia").connect(title_re=titulo_regex, timeout=3)
+        if self._intentar_atajo(titulo_regex=titulo_regex):
             self.logger.info("Conectado a ventana existente (%s)", titulo_regex)
-        except Exception:
-            self.logger.info("No estaba abierta, iniciando: %s", comando)
-            subprocess.Popen(comando, shell=True)
-            self._app = Application(backend="uia").connect(title_re=titulo_regex, timeout=tiempo_espera)
+            return self._ventana
 
+        if _hwnds_que_coinciden(titulo_regex, solo_visibles=True):
+            # El atajo declino (hay varias ventanas que coinciden, o el
+            # connect por handle fallo) pero la app SI esta abierta: hay
+            # que conectar, no lanzar otra instancia. Sin esta comprobacion
+            # el atajo convertiria "conecta si esta abierta" en "abre una
+            # segunda copia", que es peor que el problema que resuelve.
+            self.logger.info("Ya está abierta (%s); conectando por título", titulo_regex)
+            self._app = Application(backend="uia").connect(
+                title_re=titulo_regex, timeout=tiempo_espera
+            )
+            self._ventana = self._app.window(title_re=titulo_regex)
+            self._ventana.set_focus()
+            return self._ventana
+
+        self.logger.info("No estaba abierta, iniciando: %s", comando)
+        subprocess.Popen(comando, shell=True)
+        # Tras lanzarla se reintenta el atajo unos segundos: la ventana
+        # nueva aparece en EnumWindows antes de que UIA la indexe.
+        fin = time.time() + tiempo_espera
+        while time.time() < fin:
+            if self._intentar_atajo(titulo_regex=titulo_regex):
+                return self._ventana
+            time.sleep(0.5)
+
+        self._app = Application(backend="uia").connect(title_re=titulo_regex, timeout=tiempo_espera)
         self._ventana = self._app.window(title_re=titulo_regex)
         self._ventana.set_focus()
         return self._ventana
+
+    def _intentar_atajo(self, titulo_regex: str | None = None, clase: str | None = None) -> bool:
+        """Conecta por handle si se puede; deja self._app/_ventana listos.
+
+        Devuelve False sin tocar nada cuando no aplica (ninguna ventana
+        coincide, o coinciden varias) -- ahi el que llama sigue por el
+        camino de siempre. Ver `_conectar_rapido` para por que existe.
+        """
+        rapido = _conectar_rapido(titulo_regex, clase)
+        if rapido is None:
+            return False
+        app, hwnd = rapido
+        self._app = app
+        # window(handle=...) y no window(title_re=...): la especificacion
+        # perezosa por titulo volveria a lanzar la busqueda lenta la
+        # primera vez que alguien la resuelva, deshaciendo el atajo.
+        self._ventana = app.window(handle=hwnd)
+        try:
+            self._ventana.set_focus()
+        except Exception:
+            # set_focus falla si otro proceso tiene el bloqueo de primer
+            # plano; la conexion es valida igual y los clicks siguen yendo
+            # a las coordenadas correctas de esa ventana.
+            self.logger.info("No se pudo enfocar la ventana; se sigue igualmente")
+        return True
+
+    def _atajo_tras_despertar(self, titulo_regex: str | None = None, clase: str | None = None) -> bool:
+        """Despierta una ventana dormida y reintenta el atajo por handle.
+
+        Cubre el caso que este modulo ya documentaba (ventana minimizada o
+        'cloaked' por el shell, invisible para UI Automation) sin pasar por
+        la busqueda lenta: antes habia que esperar a que `connect(title_re=)`
+        agotara su timeout -- o se colgara del todo, ver `_conectar_rapido`
+        -- solo para llegar a `_despertar_ventana`.
+
+        Solo actua cuando NO hay ninguna ventana visible que coincida: si
+        las hay, el atajo ya declino por ambiguedad y despertar una
+        escondida elegiria por su cuenta cual usar.
+        """
+        if _hwnds_que_coinciden(titulo_regex, clase, solo_visibles=True):
+            return False
+        if _despertar_ventana(titulo_regex=titulo_regex, clase=clase) is None:
+            return False
+        if not self._intentar_atajo(titulo_regex=titulo_regex, clase=clase):
+            return False
+        self.logger.info("Ventana estaba dormida -- restaurada y conectada por handle")
+        return True
 
     def conectar_por_titulo(self, titulo_regex: str, tiempo_espera: int = 10):
         """Conecta SOLO con una ventana ya abierta (no la lanza si no
         existe) -- para reproducir una grabacion donde la app ya estaba
         abierta cuando se grabo, sin necesitar el comando de lanzamiento."""
         from pywinauto import Application
+
+        if self._intentar_atajo(titulo_regex=titulo_regex):
+            self.logger.info("Conectado a ventana existente (%s)", titulo_regex)
+            return self._ventana
+        if self._atajo_tras_despertar(titulo_regex=titulo_regex):
+            return self._ventana
 
         try:
             self._app = Application(backend="uia").connect(
@@ -168,6 +305,12 @@ class DesktopActions:
         barra de tareas, clase 'Shell_TrayWnd') donde conectar_por_titulo
         no tiene con que hacer match."""
         from pywinauto import Application
+
+        if self._intentar_atajo(clase=clase):
+            self.logger.info("Conectado a ventana existente por clase (%s)", clase)
+            return self._ventana
+        if self._atajo_tras_despertar(clase=clase):
+            return self._ventana
 
         try:
             self._app = Application(backend="uia").connect(class_name=clase, timeout=tiempo_espera)

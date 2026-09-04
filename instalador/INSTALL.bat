@@ -49,11 +49,21 @@ taskkill /IM LaAutomate.exe /F >nul 2>&1
 taskkill /IM Luisautomate.exe /F >nul 2>&1
 ping -n 2 127.0.0.1 >nul
 
+REM El respaldo va a una carpeta FECHADA que NO se consume al restaurar.
+REM Antes se guardaba en %TEMP% y se MOVIA de vuelta: si el restore fallaba
+REM a medias, o algo vaciaba %TEMP% entre medias, no quedaba copia de nada
+REM y las automatizaciones del usuario se perdian sin rastro.
+for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value 2^>nul') do set "AHORA=%%I"
+if not defined AHORA set "AHORA=manual"
+set "RESPALDO=%LOCALAPPDATA%\LaAutomate_respaldos\%AHORA:~0,8%_%AHORA:~8,6%"
+
 if defined PREVIA (
-    echo Conservando automatizaciones de: !PREVIA!
-    if exist "%TEMP%\LaAutomate_automations_backup" rmdir /s /q "%TEMP%\LaAutomate_automations_backup" >nul 2>&1
-    xcopy "!PREVIA!\automations" "%TEMP%\LaAutomate_automations_backup\" /E /I /Q /Y >nul
-    if exist "!PREVIA!\.env" copy "!PREVIA!\.env" "%TEMP%\LaAutomate_env_backup" >nul
+    echo Respaldando automatizaciones de: !PREVIA!
+    xcopy "!PREVIA!\automations" "%RESPALDO%\automations\" /E /I /Q /Y >nul
+    if exist "!PREVIA!\.env" copy "!PREVIA!\.env" "%RESPALDO%\.env" >nul
+    set "ANTES=0"
+    for /d %%D in ("!PREVIA!\automations\*") do set /a ANTES+=1
+    echo   !ANTES! carpeta^(s^) respaldadas en: %RESPALDO%
 )
 
 if exist "%DESTINO%" rmdir /s /q "%DESTINO%"
@@ -62,15 +72,27 @@ echo Copiando archivos nuevos...
 mkdir "%DESTINO%"
 xcopy "%ORIGEN%\*" "%DESTINO%\" /E /I /Q /Y >nul
 
-if exist "%TEMP%\LaAutomate_automations_backup" (
+if exist "%RESPALDO%\automations" (
     echo Restaurando tus automatizaciones...
-    if exist "%DESTINO%\automations" rmdir /s /q "%DESTINO%\automations"
-    move "%TEMP%\LaAutomate_automations_backup" "%DESTINO%\automations" >nul
+    REM xcopy, no move: el respaldo se queda donde esta. Si algo sale mal
+    REM aqui, la copia sigue existiendo y se puede recuperar a mano.
+    REM Las nuevas que trae el paquete no se borran; las tuyas las pisan
+    REM porque son las que tienen tus cambios.
+    xcopy "%RESPALDO%\automations" "%DESTINO%\automations\" /E /I /Q /Y >nul
+    set "DESPUES=0"
+    for /d %%D in ("%DESTINO%\automations\*") do set /a DESPUES+=1
+    echo   !DESPUES! carpeta^(s^) de automatizaciones en la instalacion.
+    if !DESPUES! LSS !ANTES! (
+        echo.
+        echo   *** AVISO: habia !ANTES! y quedaron !DESPUES!.
+        echo   *** Tu respaldo intacto esta en: %RESPALDO%\automations
+        echo.
+    )
 )
 
-if exist "%TEMP%\LaAutomate_env_backup" (
+if exist "%RESPALDO%\.env" (
     echo Restaurando tu configuracion .env...
-    move "%TEMP%\LaAutomate_env_backup" "%DESTINO%\.env" >nul
+    copy "%RESPALDO%\.env" "%DESTINO%\.env" >nul
 )
 
 echo Creando acceso directo en el escritorio...
@@ -120,5 +142,10 @@ echo   %DESTINO%
 echo.
 echo Y su acceso directo en el escritorio:
 echo   %ESCRITORIO%\LaAutomate.lnk
+if defined PREVIA (
+    echo.
+    echo Respaldo de tus automatizaciones anteriores ^(no se borra solo^):
+    echo   %RESPALDO%
+)
 echo.
 pause

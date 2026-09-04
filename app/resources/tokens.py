@@ -1,7 +1,9 @@
-"""Fuente unica de verdad del sistema de diseno (Direccion B — "Papel
-milimetrado"). Nada de valores inventados en los componentes: todo color,
-tamano y espacio sale de aqui. `construir_qss()` genera el QSS completo a
-partir de estos mismos tokens -- un solo lugar donde cambiar la paleta."""
+"""Fuente única de verdad visual de LaAutomate.
+
+La interfaz usa una estética de consola moderna: fondos grafito, superficies
+elevadas y acentos luminosos. Los colores semánticos siguen viviendo aquí
+para que una vista nunca tenga que inventar un hexadecimal propio.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,27 +11,40 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Colores:
-    papel: str = "#F6F6F3"
-    reticula: str = "#E7E7E1"
-    tarjeta: str = "#FFFFFF"
-    borde: str = "#DDDCD5"
-    borde_fuerte: str = "#C7C6BD"
-    tinta: str = "#15181D"
-    grafito: str = "#6B7280"
-    grafito_claro: str = "#9CA3AF"
-    acento: str = "#0F766E"
-    acento_suave: str = "#E3F0EE"
-    oxido: str = "#B4321F"
-    oxido_suave: str = "#F7E3E0"
-    musgo: str = "#3F8B52"
-    musgo_suave: str = "#E4F1E6"
-    ocre: str = "#C17817"
-    ocre_suave: str = "#F8ECD9"
+    papel: str = "#070B10"
+    # La sidebar va un punto mas honda que el lienzo para separarla sin
+    # dibujar un borde. Estaba escrita a mano dentro del QSS: era uno de
+    # los dos unicos colores de la interfaz que no salian de aqui, justo
+    # lo que este archivo existe para evitar.
+    papel_hondo: str = "#060A0F"
+    reticula: str = "#111923"
+    tarjeta: str = "#0C121A"
+    tarjeta_elevada: str = "#101925"
+    borde: str = "#1C2A3A"
+    borde_fuerte: str = "#2D4056"
+    tinta: str = "#F3F7FC"
+    grafito: str = "#91A4BC"
+    grafito_claro: str = "#5D718A"
+    acento: str = "#00E887"
+    # Hover del boton primario: el acento un paso mas apagado. Tambien
+    # estaba escrito a mano en el QSS.
+    acento_hover: str = "#00C978"
+    acento_suave: str = "#06271C"
+    cian: str = "#22D3EE"
+    cian_suave: str = "#08242C"
+    violeta: str = "#9B7CFF"
+    violeta_suave: str = "#1C1731"
+    oxido: str = "#FF6577"
+    oxido_suave: str = "#2B1119"
+    musgo: str = "#00E887"
+    musgo_suave: str = "#06271C"
+    ocre: str = "#FFB020"
+    ocre_suave: str = "#2B210C"
     # Tinte de fila para una ejecucion fallida en una tabla. Mas claro
     # que oxido_suave (que es fondo de badge, sobre poca superficie):
     # a lo ancho de una fila entera ese tono ya lee como bloque rojo y
     # compite con el texto en vez de solo senalar donde mirar.
-    fila_error: str = "#FDF6F5"
+    fila_error: str = "#160E14"
 
 
 @dataclass(frozen=True)
@@ -45,8 +60,8 @@ class Espaciado:
 
 @dataclass(frozen=True)
 class Radios:
-    control: int = 6
-    tarjeta: int = 10
+    control: int = 8
+    tarjeta: int = 12
 
 
 @dataclass(frozen=True)
@@ -54,12 +69,12 @@ class Tipografia:
     familia_ui: str = "Inter, 'Segoe UI', system-ui, sans-serif"
     familia_mono: str = "'IBM Plex Mono', 'Cascadia Code', Consolas, monospace"
     # 6 tamanos maximo, en px
-    t_caption: int = 12
-    t_small: int = 13
-    t_body: int = 14
+    t_caption: int = 11
+    t_small: int = 12
+    t_body: int = 13
     t_body_lg: int = 16
     t_h2: int = 20
-    t_h1: int = 28
+    t_h1: int = 26
     peso_regular: int = 400
     peso_medium: int = 500
     peso_semibold: int = 600
@@ -98,8 +113,13 @@ QWidget {{
 
 /* ---------- Sidebar ---------- */
 QWidget#sidebar {{
-    background-color: {c.tarjeta};
+    background-color: {c.papel_hondo};
     border-right: 1px solid {c.borde};
+}}
+QLabel#marcaIcono {{
+    background-color: {c.acento_suave};
+    border: 1px solid {c.acento};
+    border-radius: 7px;
 }}
 QLabel#sidebarMarca {{
     color: {c.tinta};
@@ -125,7 +145,7 @@ QPushButton#navItem {{
     font-size: {t.t_body}px;
 }}
 QPushButton#navItem:hover {{
-    background-color: {c.reticula};
+    background-color: {c.tarjeta_elevada};
     color: {c.tinta};
 }}
 QPushButton#navItem:checked {{
@@ -173,6 +193,22 @@ QFrame#tarjeta, QWidget#tarjeta {{
     border: 1px solid {c.borde};
     border-radius: {r.tarjeta}px;
 }}
+QLabel#pageEyebrow {{
+    color: {c.cian};
+    font-family: {t.familia_mono};
+    font-size: {t.t_caption}px;
+    font-weight: {t.peso_semibold};
+    letter-spacing: 0.12em;
+}}
+QFrame#tarjetaKpi {{
+    background-color: {c.tarjeta};
+    border: 1px solid {c.borde};
+    border-radius: {r.tarjeta}px;
+}}
+QFrame#tarjetaKpi:hover {{
+    background-color: {c.tarjeta_elevada};
+    border-color: {c.borde_fuerte};
+}}
 QLabel#kpiValor {{
     font-size: {t.t_h1}px;
     font-weight: {t.peso_semibold};
@@ -191,7 +227,7 @@ QLabel#kpiDelta {{
 
 /* ---------- Botones ---------- */
 QPushButton {{
-    background-color: {c.tarjeta};
+    background-color: {c.tarjeta_elevada};
     border: 1px solid {c.borde};
     border-radius: {r.control}px;
     padding: 0 {e.md}px;
@@ -200,6 +236,10 @@ QPushButton {{
     color: {c.tinta};
 }}
 QPushButton:hover {{
+    background-color: {c.borde};
+    border-color: {c.borde_fuerte};
+}}
+QPushButton:pressed {{
     background-color: {c.reticula};
 }}
 QPushButton:disabled {{
@@ -213,7 +253,8 @@ QPushButton#primario {{
     font-weight: {t.peso_semibold};
 }}
 QPushButton#primario:hover {{
-    background-color: #0C5F58;
+    background-color: {c.acento_hover};
+    border-color: {c.acento_hover};
 }}
 QPushButton#primario:disabled {{
     background-color: {c.grafito_claro};
@@ -245,7 +286,7 @@ QPushButton#modoToggle:disabled {{
 }}
 
 /* ---------- Inputs ---------- */
-QLineEdit, QPlainTextEdit, QTextEdit {{
+QLineEdit, QPlainTextEdit, QTextEdit, QTextBrowser, QComboBox, QSpinBox {{
     background-color: {c.tarjeta};
     border: 1px solid {c.borde};
     border-radius: {r.control}px;
@@ -253,7 +294,7 @@ QLineEdit, QPlainTextEdit, QTextEdit {{
     selection-background-color: {c.acento_suave};
     selection-color: {c.acento};
 }}
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QTextBrowser:focus, QComboBox:focus {{
     border: 1px solid {c.acento};
 }}
 QLineEdit {{
@@ -263,6 +304,45 @@ QPlainTextEdit#editorCodigo, QPlainTextEdit#consola {{
     font-family: {t.familia_mono};
     font-size: {t.t_small}px;
     background-color: {c.tarjeta};
+}}
+QLineEdit::placeholder, QPlainTextEdit::placeholder {{
+    color: {c.grafito_claro};
+}}
+/* OJO: aqui NO se estilan ::drop-down ni ::down-arrow, y es a proposito.
+   En cuanto la hoja de estilos define QComboBox::drop-down -- aunque solo
+   sea `border: none` -- Qt deja de dibujar la flecha nativa y el control
+   queda visualmente identico a una caja de texto: no hay forma de saber
+   que se puede desplegar. Y con el combo en modo editable el problema es
+   peor, porque hacer clic en el texto solo pone el cursor; la lista solo
+   se abre desde la flecha que no estaba.
+   El truco CSS del triangulo (width/height 0 + borders) en ::down-arrow
+   tampoco vale: Qt no lo interpreta como CSS y pinta la caja del borde,
+   un rectangulo gris. Comprobado con renders de las tres variantes.
+   Sin esas dos reglas Qt dibuja su triangulo, que se lee bien sobre el
+   fondo oscuro. */
+QComboBox {{
+    min-height: {d.alto_control}px;
+    /* hueco a la derecha para que el texto no se meta debajo de la flecha */
+    padding: 0 26px 0 {e.sm}px;
+}}
+QComboBox:hover {{
+    border-color: {c.borde_fuerte};
+}}
+QComboBox QAbstractItemView {{
+    background-color: {c.tarjeta_elevada};
+    border: 1px solid {c.borde_fuerte};
+    border-radius: {r.control}px;
+    color: {c.tinta};
+    padding: {e.xs}px;
+    outline: none;
+    selection-background-color: {c.acento_suave};
+    selection-color: {c.acento};
+}}
+/* Con 40 modelos en la lista, unas filas apretadas se leen fatal. */
+QComboBox QAbstractItemView::item {{
+    min-height: 26px;
+    padding: 0 {e.sm}px;
+    border-radius: 4px;
 }}
 
 /* ---------- Tabla ---------- */
@@ -311,7 +391,7 @@ QListWidget::item:selected {{
     font-weight: {t.peso_semibold};
 }}
 QListWidget::item:hover:!selected {{
-    background-color: {c.reticula};
+    background-color: {c.tarjeta_elevada};
 }}
 
 /* ---------- Checkbox ---------- */
@@ -350,7 +430,7 @@ QToolButton::menu-indicator {{
 
 /* ---------- Menus contextuales ---------- */
 QMenu {{
-    background-color: {c.tarjeta};
+    background-color: {c.tarjeta_elevada};
     border: 1px solid {c.borde};
     border-radius: {r.control}px;
     padding: {e.xs}px;
@@ -372,9 +452,9 @@ QMenu::separator {{
 
 /* ---------- Tooltips ---------- */
 QToolTip {{
-    background-color: {c.tinta};
-    color: {c.tarjeta};
-    border: none;
+    background-color: {c.tarjeta_elevada};
+    color: {c.tinta};
+    border: 1px solid {c.borde_fuerte};
     padding: {e.xs}px {e.sm}px;
     border-radius: {r.control}px;
 }}
@@ -404,6 +484,65 @@ QScrollBar::handle:vertical {{
     background: {c.borde_fuerte};
     border-radius: 5px;
     min-height: 24px;
+}}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}}
+QScrollBar::handle:horizontal {{
+    background: {c.borde_fuerte};
+    border-radius: 5px;
+    min-width: 24px;
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0;
+}}
+
+/* ---------- Asistente IA ---------- */
+QFrame#panelContexto {{
+    background-color: {c.tarjeta};
+    border: 1px solid {c.borde};
+    border-radius: {r.tarjeta}px;
+}}
+QFrame#burbujaUsuario {{
+    background-color: {c.acento_suave};
+    border: 1px solid {c.acento};
+    border-radius: {r.tarjeta}px;
+}}
+QFrame#burbujaIA {{
+    background-color: {c.tarjeta_elevada};
+    border: 1px solid {c.borde};
+    border-radius: {r.tarjeta}px;
+}}
+QLabel#rolUsuario {{
+    color: {c.acento};
+    font-size: {t.t_caption}px;
+    font-weight: {t.peso_semibold};
+}}
+QLabel#rolIA {{
+    color: {c.cian};
+    font-size: {t.t_caption}px;
+    font-weight: {t.peso_semibold};
+}}
+QLabel#chipArchivo {{
+    color: {c.cian};
+    background-color: {c.cian_suave};
+    border: 1px solid {c.borde_fuerte};
+    border-radius: {r.control}px;
+    padding: 5px 8px;
+    font-size: {t.t_caption}px;
+}}
+QLabel#estadoIA {{
+    color: {c.ocre};
+    font-size: {t.t_caption}px;
+    font-weight: {t.peso_semibold};
+}}
+QSplitter::handle {{
+    background-color: {c.borde};
+}}
+QSplitter::handle:horizontal {{
+    width: 1px;
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;

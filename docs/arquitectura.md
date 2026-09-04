@@ -115,11 +115,18 @@ app/main.py              arranca registry + scheduler y abre la ventana
 app/windows/             una vista por pestaña de la sidebar
 app/widgets/             piezas reutilizables (KPI, tabla, badge, toast, header…)
 app/resources/tokens.py  sistema de diseño: colores, espaciados, tipografía y el QSS
+core/gemini_client.py    cliente REST multimodal; no conoce widgets ni modifica el motor
 ```
 
 `tokens.py` es la fuente única de verdad visual: ningún componente inventa colores ni
 tamaños, y `construir_qss()` genera la hoja de estilos completa a partir de esos
 mismos tokens. Cambiar la paleta es cambiar un dataclass.
+
+La vista **Asistente IA** respeta el mismo límite entre capas: construye el contexto
+visual y conversa mediante `core/gemini_client.py`, pero la respuesta sigue siendo un
+borrador de `automation.py`. Solo una confirmación explícita crea la carpeta bajo
+`automations/`; después el registry la descubre igual que una automatización escrita
+a mano o generada por la Grabadora. Véase [Asistente IA](asistente-ia.md).
 
 El nombre de la app también sale de un solo lugar — `NOMBRE_APP` en `core/config.py` —
 del que dependen el título de la ventana y la marca de la barra lateral.

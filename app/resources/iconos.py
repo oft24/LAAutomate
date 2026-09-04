@@ -31,6 +31,8 @@ _TRAZOS: dict[str, str] = {
     "boveda": '<rect x="3.4" y="7" width="9.2" height="6.4" rx="1.4"/><path d="M5.8 7V5.4a2.2 2.2 0 0 1 4.4 0V7"/>',
     "wiki": '<path d="M2.8 3.2h3.4c1 0 1.8.8 1.8 1.8v8c0-.7-.6-1.3-1.3-1.3H2.8z"/>'
     '<path d="M13.2 3.2H9.8c-1 0-1.8.8-1.8 1.8v8c0-.7.6-1.3 1.3-1.3h3.9z"/>',
+    "asistente": '<path d="M3.2 3.4h9.6v7.2H8l-2.8 2v-2H3.2z"/>'
+    '<path d="M8 5.2v3.6M6.2 7h3.6"/>',
     "chevron_izq": '<path d="M9.8 3.5 5.3 8l4.5 4.5"/>',
     "chevron_der": '<path d="M6.2 3.5 10.7 8l-4.5 4.5"/>',
     "buscar": '<circle cx="7.2" cy="7.2" r="4.2"/><path d="M10.3 10.3 13.4 13.4"/>',

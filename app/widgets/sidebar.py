@@ -3,41 +3,56 @@ activo distinguible del hover -- reemplaza el QListWidget plano sin
 agrupar ni iconos de la version anterior."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from pathlib import Path
+
+from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QSize, Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.resources.iconos import icono
 from app.resources.tokens import COLORES, ESPACIADO
-from core.config import MARCA_CORTA, NOMBRE_APP
+from core.config import NOMBRE_APP
 
 # Iconos SVG de trazo (ver app/resources/iconos.py). Antes eran glifos
 # sueltos (⌂ ⚙ ◉ ◷ ▤ ▣ ◈) dentro del propio texto del boton: se veian
 # distinto segun la fuente que tuviera cada equipo y no podian tomar el
 # color del estado activo por separado del texto.
-_GRUPOS: list[tuple[str, list[tuple[str, str]]]] = [
+# Cada item es (clave, icono, etiqueta). La CLAVE es como el resto de la
+# app pide "llevame a esta vista": antes se usaba el indice numerico
+# (establecer_indice(6) para la Boveda), asi que insertar una vista en
+# medio -- como paso al agregar "Asistente IA" -- reordenaba en silencio
+# todos los destinos existentes sin que nada fallara de forma visible.
+# La clave tambien es lo que MainWindow usa para apilar las paginas en el
+# mismo orden: sidebar y QStackedWidget no pueden desalinearse porque
+# leen la misma lista.
+_GRUPOS: list[tuple[str, list[tuple[str, str, str]]]] = [
     (
         "Operación",
         [
-            ("panel", "Panel principal"),
-            ("automatizaciones", "Automatizaciones"),
-            ("grabadora", "Grabadora"),
-            ("programador", "Programador"),
+            ("panel", "panel", "Panel principal"),
+            ("automatizaciones", "automatizaciones", "Automatizaciones"),
+            ("grabadora", "grabadora", "Grabadora"),
+            ("programador", "programador", "Programador"),
+            ("asistente", "asistente", "Asistente IA"),
         ],
     ),
     (
         "Sistema",
         [
-            ("registros", "Registros"),
-            ("boveda", "Bóveda de credenciales"),
-            ("wiki", "Wiki"),
+            ("registros", "registros", "Registros"),
+            ("boveda", "boveda", "Bóveda de credenciales"),
+            ("wiki", "wiki", "Wiki"),
         ],
     ),
 ]
 
+CLAVES: tuple[str, ...] = tuple(clave for _grupo, items in _GRUPOS for clave, _i, _t in items)
+
 TAMANO_ICONO = 16
 
 ANCHO_EXPANDIDO = 224
-ANCHO_COLAPSADO = 56
+ANCHO_COLAPSADO = 72
+_RUTA_LOGO = Path(__file__).resolve().parent.parent / "resources" / "app_icon.png"
 
 
 class Sidebar(QWidget):
@@ -46,8 +61,10 @@ class Sidebar(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("sidebar")
-        self.setFixedWidth(ANCHO_EXPANDIDO)
+        self.setMinimumWidth(ANCHO_EXPANDIDO)
+        self.setMaximumWidth(ANCHO_EXPANDIDO)
         self._colapsado = False
+        self._animacion_ancho: QParallelAnimationGroup | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ESPACIADO.sm, ESPACIADO.md, ESPACIADO.sm, ESPACIADO.lg)
@@ -59,6 +76,20 @@ class Sidebar(QWidget):
         fila_marca = QHBoxLayout()
         fila_marca.setContentsMargins(ESPACIADO.sm, 0, 0, 0)
         fila_marca.setSpacing(ESPACIADO.xs)
+
+        self._logo = QLabel()
+        self._logo.setObjectName("marcaIcono")
+        self._logo.setFixedSize(28, 28)
+        self._logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if _RUTA_LOGO.exists():
+            pixmap = QPixmap(str(_RUTA_LOGO)).scaled(
+                24,
+                24,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._logo.setPixmap(pixmap)
+        fila_marca.addWidget(self._logo)
 
         self._marca = QLabel(NOMBRE_APP)
         self._marca.setObjectName("sidebarMarca")
@@ -88,7 +119,7 @@ class Sidebar(QWidget):
             layout.addWidget(etiqueta_grupo)
             self._etiquetas_grupo.append(etiqueta_grupo)
 
-            for nombre_icono, texto in items:
+            for _clave, nombre_icono, texto in items:
                 boton = QPushButton(self._texto_boton(texto))
                 boton.setObjectName("navItem")
                 boton.setCheckable(True)
@@ -127,17 +158,38 @@ class Sidebar(QWidget):
     def establecer_indice(self, indice: int) -> None:
         self._seleccionar(indice)
 
+    def establecer_vista(self, clave: str) -> None:
+        """Navega a una vista por su CLAVE ("boveda", "grabadora"...).
+
+        Es la forma en que el resto de la app debe pedir un salto de
+        vista: con indices, agregar una entrada a la sidebar reordenaba
+        en silencio todos los destinos existentes."""
+        if clave not in CLAVES:
+            raise KeyError(f"No existe la vista {clave!r}. Disponibles: {', '.join(CLAVES)}")
+        self._seleccionar(CLAVES.index(clave))
+
     def _alternar_colapso(self) -> None:
+        if self._animacion_ancho is not None:
+            self._animacion_ancho.stop()
         self._colapsado = not self._colapsado
-        self.setFixedWidth(ANCHO_COLAPSADO if self._colapsado else ANCHO_EXPANDIDO)
+        destino = ANCHO_COLAPSADO if self._colapsado else ANCHO_EXPANDIDO
         self._boton_colapsar.setIcon(
             icono("chevron_der" if self._colapsado else "chevron_izq", COLORES.grafito, 14)
         )
-        # Colapsada no cabe el nombre completo: se muestran las iniciales,
-        # nunca un nombre cortado a la mitad por el ancho del widget.
-        self._marca.setText(MARCA_CORTA if self._colapsado else NOMBRE_APP)
+        self._marca.setVisible(not self._colapsado)
         for boton, (_nombre_icono, texto) in zip(self._botones, self._items_planos):
             boton.setText(self._texto_boton(texto))
             boton.setToolTip(texto if self._colapsado else "")
         for etiqueta in self._etiquetas_grupo:
             etiqueta.setVisible(not self._colapsado)
+
+        grupo = QParallelAnimationGroup(self)
+        for propiedad in (b"minimumWidth", b"maximumWidth"):
+            animacion = QPropertyAnimation(self, propiedad, grupo)
+            animacion.setDuration(220)
+            animacion.setStartValue(self.width())
+            animacion.setEndValue(destino)
+            animacion.setEasingCurve(QEasingCurve.Type.OutCubic)
+            grupo.addAnimation(animacion)
+        self._animacion_ancho = grupo
+        grupo.start()

@@ -2,7 +2,7 @@
 
 > **Documento histórico.** Es el prompt con el que se especificó el proyecto y
 > guio su construcción. Se conserva como registro de las decisiones de diseño
-> originales: partes ya no reflejan el estado actual (hoy la app tiene 7 vistas,
+> originales: partes ya no reflejan el estado actual (hoy la app tiene 8 vistas,
 > grabadora de escritorio y wiki). Para el estado real, ver el resto de `docs/`.
 
 Estás trabajando en `rpa-code-platform/`, una plataforma de escritorio en Python para

@@ -23,3 +23,14 @@ dist/
 .ruff_cache/
 .idea/
 .vscode/
+
+# Datos de entrada/salida de las automatizaciones. La plantilla la genera
+# `python tools/plantilla_curp.py`, asi que no hace falta versionarla -- y
+# este es justo el sitio donde acabarian datos personales reales.
+datos/
+
+# Material de trabajo personal que quedo en la carpeta del proyecto.
+.codex-doc-review/
+
+# Respaldos que deja el instalador
+LaAutomate_respaldos/

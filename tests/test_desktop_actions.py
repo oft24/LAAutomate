@@ -230,7 +230,17 @@ def test_click_por_imagen_lanza_si_no_encuentra_la_imagen() -> None:
             acciones.click_por_imagen("no_existe.png")
 
 
-def test_conectar_por_clase_conecta_y_enfoca() -> None:
+def test_conectar_por_clase_conecta_y_enfoca(monkeypatch) -> None:
+    """El camino de siempre: buscar por class_name.
+
+    Se desactiva el atajo por handle (`_conectar_rapido`, ver
+    tests/test_conexion_rapida.py). Sin esto la prueba depende del equipo
+    donde corre: en un Windows real hay exactamente una Shell_TrayWnd, el
+    atajo se activaria y la conexion iria por handle -- correcto, pero no
+    es el camino que esta prueba cubre.
+    """
+    monkeypatch.setattr("engine.actions.desktop._conectar_rapido", lambda *a, **k: None)
+
     acciones = DesktopActions(_LoggerFalso())
     app_falsa = MagicMock()
     ventana_falsa = MagicMock()

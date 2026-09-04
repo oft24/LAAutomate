@@ -3,7 +3,15 @@ import os
 
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('app/resources/app_icon.ico', 'app/resources')]
+datas = [
+    ('app/resources/app_icon.ico', 'app/resources'),
+    ('app/resources/app_icon.png', 'app/resources'),
+    ('docs/GEMINI_SYSTEM_PROMPT.md', 'docs'),
+    ('docs/PRACTICAS.md', 'docs'),
+    ('docs/arquitectura.md', 'docs'),
+    ('docs/acciones.md', 'docs'),
+    ('docs/logica-grabadora.md', 'docs'),
+]
 binaries = []
 hiddenimports = ['win32timezone', 'pywintypes', 'pythoncom']
 tmp_ret = collect_all('keyring')

@@ -35,6 +35,7 @@ def main() -> None:
     scheduler.iniciar()
 
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     if RUTA_ICONO.exists():
         app.setWindowIcon(QIcon(str(RUTA_ICONO)))
     ventana = MainWindow(scheduler=scheduler, runner=runner)

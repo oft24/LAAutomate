@@ -57,6 +57,12 @@ class DataTable(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._filas: list[FilaEjecucion] = []
+        # Que fila esta abierta en el panel lateral. Inicializado a None
+        # a proposito: los tres botones del panel lo leen, y sin esta
+        # linea existia solo despues del primer _mostrar_detalle -- un
+        # AttributeError esperando a cualquier cambio que ensenara el
+        # panel por otro camino.
+        self._indice_detalle_actual: int | None = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -145,6 +151,7 @@ class DataTable(QWidget):
         for i, fila in enumerate(filas):
             self._pintar_fila(i, fila)
         self.panel_detalle.hide()
+        self._indice_detalle_actual = None
 
     def mostrar_fila(self, indice: int) -> None:
         """API publica para que otro widget (ej. StepTrack) pida abrir el
@@ -267,17 +274,33 @@ class DataTable(QWidget):
 
         self.panel_detalle.show()
 
+    def _fila_del_panel(self) -> FilaEjecucion | None:
+        """La fila que el panel lateral esta mostrando, o None.
+
+        Devuelve None tambien cuando el indice guardado ya no existe:
+        `establecer_filas` (el refresco automatico del panel cada 10 s)
+        reemplaza la lista entera, y el indice de antes puede quedar
+        apuntando fuera o a OTRA automatizacion -- reintentar la
+        equivocada es peor que no hacer nada."""
+        indice = self._indice_detalle_actual
+        if indice is None or not (0 <= indice < len(self._filas)):
+            return None
+        return self._filas[indice]
+
     def _abrir_captura_actual(self) -> None:
-        fila = self._filas[self._indice_detalle_actual]
-        self._abrir_ruta(fila.ruta_captura)
+        fila = self._fila_del_panel()
+        if fila:
+            self._abrir_ruta(fila.ruta_captura)
 
     def _abrir_log_actual(self) -> None:
-        fila = self._filas[self._indice_detalle_actual]
-        self._abrir_ruta(fila.ruta_log)
+        fila = self._fila_del_panel()
+        if fila:
+            self._abrir_ruta(fila.ruta_log)
 
     def _reintentar_actual(self) -> None:
-        fila = self._filas[self._indice_detalle_actual]
-        self.reintentar_solicitado.emit(fila.automatizacion)
+        fila = self._fila_del_panel()
+        if fila:
+            self.reintentar_solicitado.emit(fila.automatizacion)
 
     @staticmethod
     def _abrir_ruta(ruta: Path | None) -> None:

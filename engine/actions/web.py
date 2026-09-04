@@ -28,6 +28,10 @@ class WebActions:
         # referencia de qué cuenta como "pestaña nueva" -- ver
         # cambiar_a_pestana_nueva().
         self._handles_conocidos: set[str] = set()
+        # Carpeta a la que el navegador manda las descargas. Se aplica al
+        # ABRIRLO, asi que hay que fijarla antes del primer uso (ver
+        # descargar_en). None = la carpeta de descargas del usuario.
+        self._carpeta_descargas: Path | None = None
 
     @property
     def driver(self) -> webdriver.Chrome | webdriver.Edge:
@@ -35,6 +39,67 @@ class WebActions:
             self._driver = self._abrir_navegador(self._navegador)
             self._handles_conocidos = set(self._driver.window_handles)
         return self._driver
+
+    def descargar_en(self, carpeta: str | Path) -> Path:
+        """Manda las descargas del navegador a `carpeta`.
+
+        Hay que llamarla ANTES de abrir el navegador (antes del primer
+        `ir_a`): las preferencias de descarga se fijan al crear el driver y
+        Chrome no las relee despues. Si el navegador ya estaba abierto se
+        avisa en el log en vez de fallar en silencio, porque el sintoma
+        seria peor -- los archivos apareciendo en la carpeta equivocada sin
+        que nada indique por que.
+
+        Devuelve la carpeta (creada si no existia) para poder encadenar.
+        """
+        destino = Path(carpeta).expanduser().resolve()
+        destino.mkdir(parents=True, exist_ok=True)
+        if self._driver is not None:
+            self.logger.warning(
+                "descargar_en(%s) se llamo con el navegador ya abierto: las descargas "
+                "seguiran yendo a la carpeta anterior. Llamala antes del primer ir_a().",
+                destino,
+            )
+        self._carpeta_descargas = destino
+        return destino
+
+    def _preferencias_descarga(self) -> dict:
+        if self._carpeta_descargas is None:
+            return {}
+        return {
+            "download.default_directory": str(self._carpeta_descargas),
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            # El visor de PDF integrado abre el archivo en una pestana en
+            # vez de guardarlo: sin esto, una descarga de PDF no deja
+            # ningun archivo en la carpeta.
+            "plugins.always_open_pdf_externally": True,
+        }
+
+    def esperar_descarga(self, carpeta: str | Path, extension: str = ".pdf", timeout: float = 30) -> Path | None:
+        """Espera a que aparezca un archivo nuevo y COMPLETO en `carpeta`.
+
+        Chrome escribe primero un `.crdownload` y lo renombra al terminar,
+        asi que mirar solo "hay un archivo nuevo" devuelve a veces un PDF a
+        medio escribir. Aqui se espera a que no quede ningun `.crdownload`
+        y se devuelve el mas reciente con la extension pedida.
+
+        Devuelve None si se agota el tiempo -- que la descarga no llegue es
+        un resultado posible, no un error del motor.
+        """
+        import time
+
+        destino = Path(carpeta)
+        limite = time.time() + timeout
+        while time.time() < limite:
+            if not list(destino.glob("*.crdownload")):
+                candidatos = sorted(
+                    destino.glob(f"*{extension}"), key=lambda p: p.stat().st_mtime, reverse=True
+                )
+                if candidatos:
+                    return candidatos[0]
+            time.sleep(0.4)
+        return None
 
     def _abrir_navegador(self, navegador: str) -> webdriver.Chrome | webdriver.Edge:
         if navegador == "edge":
@@ -52,6 +117,9 @@ class WebActions:
         if self._headless:
             options.add_argument("--headless=new")
         options.add_argument("--start-maximized")
+        preferencias = self._preferencias_descarga()
+        if preferencias:
+            options.add_experimental_option("prefs", preferencias)
         return webdriver.Chrome(options=options)
 
     def _abrir_edge(self) -> webdriver.Edge:
@@ -59,6 +127,9 @@ class WebActions:
         if self._headless:
             options.add_argument("--headless=new")
         options.add_argument("--start-maximized")
+        preferencias = self._preferencias_descarga()
+        if preferencias:
+            options.add_experimental_option("prefs", preferencias)
         return webdriver.Edge(options=options)
 
     def _recordar_pestanas(self) -> None:
@@ -84,6 +155,37 @@ class WebActions:
         el = self._wait().until(EC.visibility_of_element_located((by, selector)))
         el.clear()
         el.send_keys(texto)
+
+    def seleccionar(
+        self,
+        selector: str,
+        valor: str | None = None,
+        texto: str | None = None,
+        by: str = By.CSS_SELECTOR,
+    ) -> None:
+        """Elige una opcion de un <select>, por `valor` o por `texto` visible.
+
+        Un `<select>` no se automatiza con click + escribir: hay que usar
+        la clase Select de Selenium, que dispara los eventos `change` que
+        la pagina escucha. Escribir dentro de el no cambia la seleccion y
+        el formulario se envia vacio, que es un fallo silencioso.
+
+        Se prefiere `valor` (el atributo value del <option>) porque no
+        cambia con el idioma de la pagina; `texto` queda para cuando el
+        value no es legible.
+        """
+        from selenium.webdriver.support.ui import Select
+
+        if (valor is None) == (texto is None):
+            raise ValueError("seleccionar() necesita exactamente uno de `valor` o `texto`.")
+
+        elemento = self._wait().until(EC.presence_of_element_located((by, selector)))
+        desplegable = Select(elemento)
+        if valor is not None:
+            desplegable.select_by_value(valor)
+        else:
+            desplegable.select_by_visible_text(texto)
+        self.logger.info("Seleccionado %r en %s", valor if valor is not None else texto, selector)
 
     def leer_texto(self, selector: str, by: str = By.CSS_SELECTOR) -> str:
         el = self._wait().until(EC.visibility_of_element_located((by, selector)))

@@ -20,6 +20,9 @@ al terminar, falle o no.
 | `click(selector, by=By.CSS_SELECTOR)` | Espera a que el elemento sea clickeable y hace clic. |
 | `escribir(selector, texto, by=By.CSS_SELECTOR)` | Espera visibilidad, limpia el campo y escribe. |
 | `leer_texto(selector, by=By.CSS_SELECTOR)` | Espera visibilidad y devuelve el texto. |
+| `seleccionar(selector, valor=..., texto=..., by=...)` | Elige una opción de un `<select>`. **Un desplegable no se automatiza escribiendo dentro**: hay que usar esto o el formulario se envía vacío, sin error. Prefiere `valor` (el `value` del `<option>`), que no cambia con el idioma. |
+| `descargar_en(carpeta)` | Manda las descargas del navegador a esa carpeta. Hay que llamarlo **antes** del primer `ir_a()`: Chrome fija las preferencias de descarga al arrancar y no las relee. |
+| `esperar_descarga(carpeta, extension=".pdf", timeout=30)` | Espera a que la descarga termine de verdad. Chrome escribe primero un `.crdownload` y lo renombra al acabar, así que mirar solo "hay un archivo nuevo" devuelve a veces un PDF a medio escribir. Devuelve `None` si se agota el tiempo. |
 | `screenshot_error(nombre)` | Guarda una captura en `logs/screenshots/`. Lo llama el runner solo. |
 | `cerrar()` | Cierra el navegador entero, con todas sus pestañas. |
 
@@ -164,6 +167,30 @@ ventanas de apps UWP suspendidas, y una ventana así es invisible para UI
 Automation aunque `IsWindowVisible()` diga que sí — `connect()` se quedaba
 esperando hasta agotar el tiempo, con un `TimeoutError` sin pistas, sobre una app
 que estaba perfectamente abierta. Ambos métodos reintentan tras restaurarla.
+
+**El texto de la captura no es el localizador.** `click_por_texto` busca el nombre
+de ACCESIBILIDAD del control, que a menudo no es lo que está dibujado. En la
+Calculadora de Windows en español, los botones `1`, `×` y `=` se llaman `Uno`,
+`Multiplicar por` y `Es igual a`. Si dudas, lee los nombres reales con
+`self.escritorio.leer_items_lista("Button")`, o resuélvelo por teclado con
+`escribir(...)`/`atajo(...)`, que no dependen del idioma.
+
+**Conectar es instantáneo, aunque tengas medio escritorio abierto.** Los tres
+métodos de conexión buscan primero la ventana con `EnumWindows` de Win32 y luego
+conectan por *handle*; solo caen a la búsqueda por título/clase de pywinauto si hay
+más de una ventana que coincide (ahí se prefiere que pywinauto lance su
+`ElementAmbiguousError` antes que elegir una por nuestra cuenta y teclear en la
+equivocada). El motivo es medido, en un equipo con 389 ventanas de nivel superior:
+
+| | |
+|---|---|
+| `connect(handle=hwnd)` | 0,0 s |
+| `connect(title_re="Calculadora")` | no volvió en 2 minutos |
+
+No es que fuera lento: se colgaba, porque UI Automation recorre el escritorio
+entero. Y de ese cuelgue no se sale: el botón **Cancelar** inyecta una excepción con
+`PyThreadState_SetAsyncExc`, que solo surte efecto en el siguiente *bytecode* de
+Python — dentro de una llamada C larga, nunca.
 
 Para **grabar** un proceso que toca varias apps, la vista Grabadora tiene la
 casilla *"Cualquier ventana (sin candado)"*; sin ella solo se graba la ventana

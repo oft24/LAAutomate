@@ -80,7 +80,8 @@ puedas editar una automatización desde la app instalada y que funcione.
 - `collect_all` de **keyring** (backends que se cargan dinámicamente), **selenium** y
   **pynput** (el listener global de F5 de la grabadora).
 - `hiddenimports` de `win32timezone`, `pywintypes` y `pythoncom`, que entran por COM.
-- El icono `app/resources/app_icon.ico`, como dato y como icono del `.exe`.
+- El icono `app/resources/app_icon.ico`, su PNG para la marca de la sidebar y los
+  documentos que forman el contexto versionado del Asistente IA.
 
 Si agregas una dependencia que se importe dinámicamente, va a fallar solo en el
 `.exe` — no en desarrollo. Ahí es donde hay que agregarla.

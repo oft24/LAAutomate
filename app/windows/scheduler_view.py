@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -21,6 +21,8 @@ from engine.registry import listar
 
 _COLUMNAS = ["Automatización", "Categoría", "Disparador", "Próxima ejecución", "Estado"]
 
+REFRESCO_MS = 60_000
+
 
 class SchedulerView(QWidget):
     def __init__(self, scheduler) -> None:
@@ -37,9 +39,9 @@ class SchedulerView(QWidget):
 
         fila_kpis = QHBoxLayout()
         fila_kpis.setSpacing(ESPACIADO.lg)
-        self.kpi_programadas = KpiCard("Programadas (cron)", "—")
-        self.kpi_manuales = KpiCard("Solo manuales", "—")
-        self.kpi_proxima = KpiCard("Próxima ejecución", "—")
+        self.kpi_programadas = KpiCard("Programadas (cron)", "—", tono="acento")
+        self.kpi_manuales = KpiCard("Solo manuales", "—", tono="cian")
+        self.kpi_proxima = KpiCard("Próxima ejecución", "—", tono="violeta")
         for kpi in (self.kpi_programadas, self.kpi_manuales, self.kpi_proxima):
             fila_kpis.addWidget(kpi)
         layout.addLayout(fila_kpis)
@@ -75,6 +77,30 @@ class SchedulerView(QWidget):
         self._pila.addWidget(self._vacio)
         layout.addWidget(self._contenedor, stretch=1)
 
+        # Antes esta tabla se llenaba UNA vez, en el constructor, y nunca
+        # mas: una automatizacion grabada (o creada por el Asistente IA)
+        # despues de arrancar no aparecia aqui hasta reiniciar la app, y
+        # "Proxima ejecucion" se quedaba congelada en la hora que era
+        # cuando abriste el programa. Ahora se recalcula al entrar a la
+        # vista y cada minuto mientras se esta mirando.
+        self._timer = QTimer(self)
+        self._timer.setInterval(REFRESCO_MS)
+        self._timer.timeout.connect(self.refrescar)
+
+        self._llenar()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.refrescar()
+        self._timer.start()
+
+    def hideEvent(self, event) -> None:
+        # Parado mientras no se ve: recorrer los jobs cada minuto para una
+        # pagina que nadie esta mirando es trabajo tirado.
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def refrescar(self) -> None:
         self._llenar()
 
     def _llenar(self) -> None:

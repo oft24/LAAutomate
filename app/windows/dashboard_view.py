@@ -47,10 +47,10 @@ class DashboardView(QWidget):
 
         fila_kpis = QHBoxLayout()
         fila_kpis.setSpacing(16)
-        self.kpi_hoy = KpiCard("Ejecuciones hoy", "—")
-        self.kpi_exito = KpiCard("Tasa de éxito (7 días)", "—")
-        self.kpi_duracion = KpiCard("Duración media", "—")
-        self.kpi_proxima = KpiCard("Próxima ejecución", "—")
+        self.kpi_hoy = KpiCard("Ejecuciones hoy", "—", tono="cian")
+        self.kpi_exito = KpiCard("Tasa de éxito (7 días)", "—", tono="acento")
+        self.kpi_duracion = KpiCard("Duración media", "—", tono="ocre")
+        self.kpi_proxima = KpiCard("Próxima ejecución", "—", tono="violeta")
         for kpi in (self.kpi_hoy, self.kpi_exito, self.kpi_duracion, self.kpi_proxima):
             fila_kpis.addWidget(kpi)
         layout_raiz.addLayout(fila_kpis)
@@ -193,7 +193,7 @@ class DashboardView(QWidget):
     def _ir_a_automatizaciones(self) -> None:
         ventana = self.window()
         if hasattr(ventana, "sidebar"):
-            ventana.sidebar.establecer_indice(1)
+            ventana.sidebar.establecer_vista("automatizaciones")
 
     def _ejecutar_todo(self) -> None:
         especificaciones = listar()
@@ -211,7 +211,10 @@ class DashboardView(QWidget):
             mostrar_toast(self, f"No encontré la automatización '{nombre}'.", "error")
             return
 
-        worker = AutomationWorker(self.runner, spec)
+        # Sin autocorreccion: "Reintentar" es volver a intentarlo tal
+        # cual, no una sesion de reparacion. Esa vive en la vista
+        # Automatizaciones, donde se ve el codigo que se va a cambiar.
+        worker = AutomationWorker(self.runner, spec, autocorregir=False)
         worker.finalizado.connect(lambda resultado: self._al_reintentar_terminado(nombre, resultado, worker))
         self._workers.append(worker)
         worker.start()

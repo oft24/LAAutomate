@@ -12,10 +12,7 @@ el resto de la grabacion (ver GrabadoraEscritorio para el porque de este
 diseno). Genera codigo para self.escritorio."""
 from __future__ import annotations
 
-import importlib
 import os
-import sys
-from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -36,12 +33,14 @@ from PySide6.QtWidgets import (
 from app.resources.tokens import COLORES, ESPACIADO
 from app.widgets.grabacion import EstadoGrabacion, PasosGrabados
 from app.widgets.page_header import PageHeader
+from app.widgets.python_highlighter import PythonHighlighter
 from app.widgets.toast import mostrar_toast
 from core.config import LOGS_DIR
 from core.logger import get_logger
 from core.vault import Vault
 from engine.actions.desktop_recorder import GrabadoraEscritorio, generar_codigo_escritorio
-from engine.actions.recorder import GrabadoraWeb, generar_codigo, nombre_de_clase, validar_nombre
+from engine.actions.recorder import GrabadoraWeb, generar_codigo, validar_nombre
+from engine.almacen import guardar_automatizacion
 from engine.actions.web import WebActions
 
 
@@ -485,6 +484,7 @@ class RecorderView(QWidget):
         columna_codigo.addWidget(self._subtitulo("Código generado"))
         self.vista_codigo = QPlainTextEdit(readOnly=True)
         self.vista_codigo.setObjectName("editorCodigo")
+        self._resaltador_codigo = PythonHighlighter(self.vista_codigo.document())
         self.vista_codigo.setPlaceholderText(
             "Aquí vas a ver el código generado en cuanto detengas la grabación."
         )
@@ -773,21 +773,12 @@ class RecorderView(QWidget):
         self._marcar_error(f"Error al detener la grabación: {mensaje}")
 
     def _guardar_automatizacion(self, nombre: str, codigo: str) -> None:
-        carpeta = Path("automations") / nombre
-        carpeta.mkdir(parents=True, exist_ok=True)
-        (carpeta / "automation.py").write_text(codigo, encoding="utf-8")
-
-        clase = nombre_de_clase(nombre)
-        (carpeta / "__init__.py").write_text(
-            f"from automations.{nombre}.automation import {clase}\n\n__all__ = [{clase!r}]\n",
-            encoding="utf-8",
-        )
-
-        nombre_modulo = f"automations.{nombre}.automation"
-        if nombre_modulo in sys.modules:
-            importlib.reload(sys.modules[nombre_modulo])
-        else:
-            importlib.import_module(nombre_modulo)
+        # Escribir la carpeta, el __init__.py y recargar el modulo vive
+        # en engine.almacen: el __init__.py se genera leyendo del codigo
+        # QUE clase exportar, en vez de suponer que se llama igual que la
+        # carpeta en CamelCase -- cuando no coincide, la automatizacion
+        # muere con ImportError al recargar, no al guardar.
+        guardar_automatizacion(nombre, codigo)
 
     def _marcar_error(self, mensaje: str) -> None:
         self.estado.setText(mensaje)

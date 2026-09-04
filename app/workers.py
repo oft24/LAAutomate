@@ -36,15 +36,28 @@ class _HandlerSenal(logging.Handler):
 
 class AutomationWorker(QThread):
     """Corre `spec` en un hilo aparte. Emite cada linea de log conforme
-    ocurre (log_line) y el AutomationResult final (finalizado)."""
+    ocurre (log_line) y el AutomationResult final (finalizado).
+
+    Si `autocorregir` esta activo y hay API key de Gemini, un fallo no
+    termina ahi: se diagnostica con la captura del momento y la bitacora
+    de acciones, se aplica el arreglo y se reanuda, hasta 5 veces. La
+    `Reparacion` completa viaja en la senal `reparado` para que la
+    interfaz pueda ensenar que paso.
+
+    Solo las ejecuciones MANUALES pasan por aqui. El scheduler llama a
+    `runner.ejecutar_async` directamente, asi que un cron nunca reescribe
+    codigo por su cuenta: nadie esta mirando a las 3 de la manana.
+    """
 
     log_line = Signal(str)
     finalizado = Signal(object)
+    reparado = Signal(object)
 
-    def __init__(self, runner: Runner, spec: AutomationSpec) -> None:
+    def __init__(self, runner: Runner, spec: AutomationSpec, autocorregir: bool = True) -> None:
         super().__init__()
         self.runner = runner
         self.spec = spec
+        self.autocorregir = autocorregir
         self._id_hilo: int | None = None
 
     def run(self) -> None:
@@ -57,10 +70,24 @@ class AutomationWorker(QThread):
         handler = _HandlerSenal(self.log_line)
         logger.addHandler(handler)
         try:
-            resultado = self.runner.ejecutar(self.spec)
+            resultado = self._correr()
         finally:
             logger.removeHandler(handler)
         self.finalizado.emit(resultado)
+
+    def _correr(self):
+        if not self.autocorregir:
+            return self.runner.ejecutar(self.spec)
+
+        # Import tardio: engine.autocorreccion arrastra el cliente de
+        # Gemini, y una ejecucion sin autocorreccion no tiene por que
+        # pagar ese import.
+        from engine.autocorreccion import Autocorrector
+
+        corrector = Autocorrector(self.runner, on_progreso=self.log_line.emit)
+        reparacion = corrector.ejecutar(self.spec)
+        self.reparado.emit(reparacion)
+        return reparacion.resultado
 
     def cancelar(self) -> None:
         """Mejor esfuerzo, no instantaneo: Python solo revisa excepciones

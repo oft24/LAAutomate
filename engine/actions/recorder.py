@@ -13,6 +13,10 @@ import time
 
 from engine.actions.web import WebActions
 
+# Reexportadas: viven en engine.almacen (no arrastran Selenium) pero se
+# siguen importando desde aqui en varios sitios y en las pruebas.
+from engine.almacen import NOMBRE_VALIDO as _NOMBRE_VALIDO, nombre_de_clase, validar_nombre  # noqa: F401
+
 # Se ejecuta dentro de la pagina. Genera un selector CSS razonablemente
 # estable para el elemento donde ocurrio el evento (prioriza id / atributos
 # semanticos antes de caer a una ruta por posicion), y empuja el evento a
@@ -141,7 +145,6 @@ _SONDEO_Y_LIMPIEZA = (
     "catch (err) {} localStorage.removeItem('__rpaEventos'); return e;"
 )
 
-_NOMBRE_VALIDO = re.compile(r"^[a-z][a-z0-9_]*$")
 
 # Un comentario de Python termina en el primer salto de linea real -- si
 # 'texto' (el innerText de lo que se clickeo, tomado tal cual de una pagina
@@ -361,18 +364,6 @@ class GrabadoraWeb:
                 self.logger.debug("Sondeo de grabación interrumpido: %s", exc)
                 return
             time.sleep(0.4)
-
-
-def nombre_de_clase(nombre_automatizacion: str) -> str:
-    return "".join(parte.capitalize() for parte in nombre_automatizacion.split("_"))
-
-
-def validar_nombre(nombre: str) -> None:
-    if not _NOMBRE_VALIDO.match(nombre):
-        raise ValueError(
-            "El nombre debe empezar con una letra minúscula y usar solo letras, números y guion bajo "
-            "(ej. 'mi_proceso_web')."
-        )
 
 
 def _depurar_pasos(pasos: list[dict]) -> list[dict]:

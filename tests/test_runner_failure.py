@@ -40,3 +40,31 @@ def test_fallo_genera_screenshot_de_escritorio(tmp_path, monkeypatch) -> None:
 
     captura = tmp_path / "logs" / "screenshots" / "_prueba_fallo_interno_error.png"
     assert captura.exists() and captura.stat().st_size > 0
+
+
+def test_la_captura_del_navegador_no_la_pisa_la_del_escritorio(tmp_path, monkeypatch) -> None:
+    """Las dos capturas de error escribian en <nombre>_error.png, asi que
+    en una automatizacion web con navegador vivo la foto del escritorio
+    borraba la del navegador -- la unica que encuadra la pagina donde
+    fallo. Ahora conviven en archivos distintos."""
+    from engine.actions.web import WebActions
+
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "rpa_test.db")
+    monkeypatch.chdir(tmp_path)
+
+    capturas = tmp_path / "logs" / "screenshots"
+    capturas.mkdir(parents=True)
+
+    def _screenshot_web_falso(self, nombre):
+        ruta = capturas / f"{nombre}_error.png"
+        ruta.write_bytes(b"captura-del-navegador")
+        return ruta
+
+    monkeypatch.setattr(WebActions, "screenshot_error", _screenshot_web_falso)
+
+    Runner().ejecutar(obtener("_prueba_fallo_interno"))
+
+    del_navegador = capturas / "_prueba_fallo_interno_error.png"
+    del_escritorio = capturas / "_prueba_fallo_interno_error_escritorio.png"
+    assert del_navegador.read_bytes() == b"captura-del-navegador"
+    assert del_escritorio.exists() and del_escritorio.stat().st_size > 0
