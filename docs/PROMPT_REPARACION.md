@@ -1,4 +1,4 @@
-# repair_prompt_v2
+# repair_prompt_v4
 
 Prompt del agente de reparación. Lo carga `engine/autocorreccion.py` en cada
 intento. **No lo edites a mano sin subir la versión** de la primera línea:
@@ -130,6 +130,14 @@ identificador de ejecución. Prefiere validación por estado.
 
 ## Fallos conocidos de este proyecto
 
+- Si la aplicación está cerrada, no cambies la lógica de negocio para esconder
+  el error. Usa `self.escritorio.iniciar_o_conectar(comando, titulo_regex,
+  tiempo_espera=30, nombre_aplicacion="Nombre exacto")`: conecta con la ventana
+  abierta o intenta iniciar el comando; si el nombre no está en PATH, busca su
+  acceso exacto en Inicio. No selecciona resultados ambiguos ni instala programas.
+  Espera la ventana y verifica sesión/control destino antes de escribir o enviar.
+  Si aparece login, actualización o permiso pendiente, informa la precondición.
+
 - `click_por_texto` busca el nombre de **accesibilidad** del control, no el
   texto dibujado. En la Calculadora en español, `1`, `×` y `=` se llaman
   `Uno`, `Multiplicar por` y `Es igual a`. Si la tarea se puede hacer por
@@ -221,9 +229,12 @@ guardes detalles específicos de la ejecución.
 
 ## Salida obligatoria
 
-Devuelve **solo JSON válido**, sin markdown alrededor, con esta estructura
-exacta. Después del JSON, y solo si propones un cambio de código, incluye un
-único bloque ```python con el archivo `automation.py` completo y corregido.
+Devuelve primero **un único objeto JSON válido**, con esta estructura exacta.
+Después del cierre del objeto, y solo si propones un cambio de código, incluye
+un único bloque ```python con el archivo `automation.py` completo y corregido.
+No mezcles Python dentro del objeto JSON, no concatenes varios informes y no
+añadas explicaciones fuera de estos dos componentes. El informe no constituye
+una validación ejecutada: el motor decide si lo aplica y vuelve a ejecutar.
 
 Tres cosas sobre ese bloque:
 

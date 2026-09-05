@@ -158,6 +158,7 @@ nadie detecta.
 <!-- INICIO AUTOCORRECTOR -->
 
 - **2026-09-04 · la propia interfaz de LaAutomate** — Un boton de navegacion marcable (checkable) de Qt se expone como CheckBox, no como Button, y su nombre puede llevar espacios delante: usa click_por_texto con control_type='CheckBox' y compara con .strip(). (tras: ElementNotFoundError buscando control_type=Button)
+- **2026-09-05 · buscar_perros_santa_discord** — Utilizar atajos de teclado nativos de la aplicación (como Ctrl+K en Discord/Slack) para buscar y cambiar de canal de forma determinista. (aplícala cuando: Automatizaciones de escritorio que interactúen con Discord, Slack, VS Code u otras aplicaciones basadas en Electron con Quick Switcher.) (tras: ElementNotFoundError: {'title': 'chat-general-no-mudae', 'top_level_only': False, 'parent')
 
 <!-- FIN AUTOCORRECTOR -->
 

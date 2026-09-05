@@ -5,10 +5,13 @@ import ast
 import importlib
 import re
 import sys
+import threading
+import time
+from uuid import uuid4
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal, QSize
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, QSize, QTemporaryDir
+from PySide6.QtGui import QIcon, QPixmap, QImage
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -54,6 +57,49 @@ from engine.diagnostico import contexto_de_fallo, prompt_de_correccion
 from engine.registry import errores_de_descubrimiento, listar
 
 _NOMBRE_SEGURO = re.compile(r"[^a-z0-9_]+")
+
+
+class _EntradaChat(QPlainTextEdit):
+    imagenPegada = Signal(QImage)
+
+    def insertFromMimeData(self, fuente):
+        if self.isReadOnly():
+            return
+        if fuente.hasImage():
+            self.imagenPegada.emit(QImage(fuente.imageData()))
+        else:
+            super().insertFromMimeData(fuente)
+
+
+class _CapturasWorker(QThread):
+    listo = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, rutas, parent=None, imagen=None):
+        super().__init__(parent)
+        self.rutas = rutas
+        self.imagen = imagen
+
+    def run(self):
+        try:
+            if self.imagen is not None:
+                if not self.imagen.save(str(self.rutas[-1]), "PNG"):
+                    raise ValueError("No se pudo preparar la imagen del portapapeles.")
+            datos = validar_capturas(self.rutas)
+            miniaturas = {}
+            for ruta, (_, contenido) in zip(self.rutas, datos):
+                imagen = QImage.fromData(contenido)
+                if imagen.isNull():
+                    raise ValueError(f"No se pudo mostrar {ruta.name}.")
+                miniaturas[str(ruta)] = imagen.scaled(
+                    64, 44, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            self.listo.emit((self.rutas, miniaturas))
+        except Exception as exc:
+            if self.imagen is not None:
+                self.rutas[-1].unlink(missing_ok=True)
+            self.error.emit(str(exc))
 _NOMBRE_EN_DECORADOR = re.compile(
     r"(@registrar\s*\(\s*nombre\s*=\s*)([\"'])(.*?)(\2)", re.DOTALL
 )
@@ -212,14 +258,19 @@ class _GeminiWorker(QThread):
         self.capturas = capturas
         self.contexto = contexto
         self.modelo = modelo
+        self.cancelado = threading.Event()
+
+    def cancelar(self):
+        self.cancelado.set()
 
     def run(self) -> None:
         try:
-            respuesta = GeminiClient(modelo=self.modelo).generar(
+            respuesta = GeminiClient(modelo=self.modelo, timeout=(10, 90), reintentos=0).generar(
                 self.mensaje,
                 historial=self.historial,
                 capturas=self.capturas,
                 contexto=self.contexto,
+                cancelado=self.cancelado,
             )
         except Exception as exc:  # noqa: BLE001 - se traduce a un mensaje de UI
             self.error.emit(f"{type(exc).__name__}: {exc}")
@@ -326,7 +377,9 @@ class AssistantView(QWidget):
         v = QVBoxLayout(compositor)
         v.setContentsMargins(ESPACIADO.md, ESPACIADO.md, ESPACIADO.md, ESPACIADO.md)
         v.setSpacing(ESPACIADO.sm)
-        self.entrada = QPlainTextEdit()
+        self.entrada = _EntradaChat()
+        self.entrada.imagenPegada.connect(self._pegar_imagen)
+        self.entrada.setToolTip("Pega texto o imágenes con Ctrl+V. Puedes agregar varias capturas.")
         self.entrada.setPlaceholderText(
             "Ejemplo: inicia sesión, descarga el reporte visible en la captura y guárdalo en Excel…"
         )
@@ -364,6 +417,10 @@ class AssistantView(QWidget):
         self.boton_enviar = QPushButton("Generar con Gemini")
         self.boton_enviar.setObjectName("primario")
         self.boton_enviar.clicked.connect(self._enviar)
+        self.boton_cancelar_chat = QPushButton("Cancelar generación")
+        self.boton_cancelar_chat.setEnabled(False)
+        self.boton_cancelar_chat.clicked.connect(self._cancelar_chat)
+        fila.addWidget(self.boton_cancelar_chat)
         fila.addWidget(self.boton_enviar)
         v.addLayout(fila)
         layout.addWidget(compositor)
@@ -747,53 +804,113 @@ class AssistantView(QWidget):
         ))
 
     def _adjuntar_capturas(self) -> None:
-        rutas, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Adjuntar capturas",
-            str(Path.home()),
-            "Imágenes (*.png *.jpg *.jpeg *.webp)",
-        )
-        existentes = {str(ruta).lower() for ruta in self._capturas}
-        for texto in rutas:
-            ruta = Path(texto)
-            if str(ruta).lower() not in existentes:
-                try:
-                    validar_capturas([*self._capturas, ruta])
-                except Exception as exc:
-                    self.estado.setText(str(exc))
-                    continue
-                self._capturas.append(ruta)
-                self.lista_capturas.addItem(ruta.name)
-                existentes.add(str(ruta).lower())
+        if self._worker is not None or getattr(self, "_worker_capturas", None):
+            return
+        if getattr(self, "_dialogo_capturas", None):
+            self._dialogo_capturas.raise_()
+            return
+        dialogo = QFileDialog(self, "Adjuntar capturas")
+        # Evita extensiones del shell/OneDrive del selector nativo de Windows.
+        dialogo.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        dialogo.setOption(QFileDialog.Option.DontUseCustomDirectoryIcons, True)
+        dialogo.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        dialogo.setNameFilter("Imágenes (*.png *.jpg *.jpeg *.webp)")
+        dialogo.setDirectory(str(BASE_DIR))
+        dialogo.filesSelected.connect(self._cargar_capturas)
+        dialogo.finished.connect(self._cerrar_selector_capturas)
+        self._dialogo_capturas = dialogo
+        dialogo.open()
+
+    def _cerrar_selector_capturas(self, _resultado):
+        dialogo = self._dialogo_capturas
+        self._dialogo_capturas = None
+        dialogo.deleteLater()
+
+    def _pegar_imagen(self, imagen):
+        if self._worker is not None:
+            return
+        if imagen.isNull() or imagen.width() * imagen.height() > 25_000_000:
+            self.estado.setText("Imagen inválida o demasiado grande (máximo 25 megapíxeles).")
+            return
+        if getattr(self, "_worker_capturas", None):
+            self.estado.setText("Espera a que termine la carga y vuelve a pegar la siguiente captura.")
+            return
+        if len(self._capturas) >= 10:
+            self.estado.setText("Adjunta como máximo 10 capturas por turno.")
+            return
+        if not hasattr(self, "_temporales_capturas"):
+            self._temporales_capturas = QTemporaryDir()
+        if not self._temporales_capturas.isValid():
+            self.estado.setText("No se pudo crear la carpeta temporal para la captura.")
+            return
+        ruta = Path(self._temporales_capturas.path()) / f"Pegada-{uuid4().hex[:8]}.png"
+        self._cargar_capturas([str(ruta)], imagen=imagen)
+
+    def _cargar_capturas(self, rutas, imagen=None):
+        if not rutas or self._worker is not None or getattr(self, "_worker_capturas", None):
+            return
+        unicas = {str(r).lower(): r for r in self._capturas}
+        for ruta in rutas:
+            unicas.setdefault(str(Path(ruta)).lower(), Path(ruta))
+        if len(unicas) > 10:
+            self.estado.setText("Adjunta como máximo 10 capturas por turno.")
+            return
+        self.estado.setText("Validando capturas… No se envía nada a Gemini.")
+        self._worker_capturas = _CapturasWorker(list(unicas.values()), self, imagen=imagen)
+        for boton in (self.boton_adjuntar, self.boton_limpiar, self.boton_quitar, self.boton_enviar, self._sugerencias):
+            boton.setEnabled(False)
+        self._worker_capturas.listo.connect(self._capturas_listas)
+        self._worker_capturas.error.connect(self.estado.setText)
+        self._worker_capturas.finished.connect(self._liberar_capturas)
+        self._worker_capturas.start()
+
+    def _capturas_listas(self, resultado):
+        self._capturas, self._miniaturas = resultado
+        self.estado.setText("Capturas listas. Revisa su contenido antes de generar.")
+        self._refrescar_capturas()
+
+    def _liberar_capturas(self):
+        self._worker_capturas.deleteLater()
+        self._worker_capturas = None
+        self.boton_adjuntar.setEnabled(self._worker is None)
+        self.boton_enviar.setEnabled(self._worker is None)
+        self._sugerencias.setEnabled(self._worker is None)
         self._refrescar_capturas()
 
     def _refrescar_capturas(self) -> None:
         self.lista_capturas.clear()
         for ruta in self._capturas:
             item = QListWidgetItem(ruta.name)
-            pixmap = QPixmap(str(ruta))
-            if not pixmap.isNull():
-                item.setIcon(QIcon(pixmap.scaled(64, 44, Qt.AspectRatioMode.KeepAspectRatio,
-                                              Qt.TransformationMode.SmoothTransformation)))
+            imagen = getattr(self, "_miniaturas", {}).get(str(ruta))
+            if imagen is not None:
+                item.setIcon(QIcon(QPixmap.fromImage(imagen)))
             item.setToolTip(str(ruta))
             self.lista_capturas.addItem(item)
         cantidad = len(self._capturas)
         self.resumen_capturas.setText(f"{cantidad} captura(s) para el siguiente envío · máximo 12 MB"
                                      if cantidad else "Sin capturas. Puedes describir el flujo solo con texto.")
-        self.boton_limpiar.setEnabled(bool(cantidad) and self._worker is None)
+        libre = self._worker is None and getattr(self, "_worker_capturas", None) is None
+        self.boton_limpiar.setEnabled(bool(cantidad) and libre)
+        self.boton_quitar.setEnabled(self.lista_capturas.currentRow() >= 0 and libre)
 
     def _quitar_captura(self) -> None:
         indice = self.lista_capturas.currentRow()
-        if self._worker is None and 0 <= indice < len(self._capturas):
+        if self._worker is None and getattr(self, "_worker_capturas", None) is None and 0 <= indice < len(self._capturas):
             self._capturas.pop(indice)
             self._refrescar_capturas()
 
     def _limpiar_capturas(self) -> None:
+        if getattr(self, "_worker_capturas", None) is not None:
+            return
+        self._miniaturas = {}
         self._capturas.clear()
         self.lista_capturas.clear()
         self._refrescar_capturas()
 
     def _enviar(self) -> None:
+        if getattr(self, "_worker_capturas", None) is not None:
+            self.estado.setText("Espera a que termine la carga de capturas.")
+            return
         if self._worker_modelos is not None:
             self.estado.setText("Espera a que termine la consulta de modelos antes de generar.")
             return
@@ -812,7 +929,8 @@ class AssistantView(QWidget):
             return
 
         try:
-            validar_capturas(self._capturas)
+            # GeminiWorker valida de nuevo los archivos antes de enviarlos.
+            # Nunca leer/decodificar imágenes en el hilo de la interfaz.
             contexto = construir_contexto_proyecto(self.combo_automatizacion.currentData())
             modelo = self.combo_modelo.currentText().strip()
             if not re.fullmatch(r"[A-Za-z0-9._-]+", modelo):
@@ -832,6 +950,9 @@ class AssistantView(QWidget):
         self._timer_pensando.start()
         self.estado.setText(f"Generando con {modelo}…")
         self.boton_enviar.setText("Generando…")
+        self._inicio_generacion = time.monotonic()
+        self._generacion_cancelada = False
+        self.boton_cancelar_chat.setEnabled(True)
         self.panel_resultado.hide()
         for widget in (self.combo_modelo, self.combo_automatizacion, self.boton_adjuntar,
                        self.boton_limpiar, self.boton_quitar, self.boton_clave, self.boton_olvidar,
@@ -851,10 +972,25 @@ class AssistantView(QWidget):
         self._worker.start()
 
     def _animar_estado(self) -> None:
+        if getattr(self, "_generacion_cancelada", False):
+            return
         self._puntos = (self._puntos + 1) % 4
-        self.estado.setText("Analizando contexto" + "." * self._puntos)
+        segundos = int(time.monotonic() - getattr(self, "_inicio_generacion", time.monotonic()))
+        self.estado.setText(f"Esperando respuesta de Gemini · {segundos} s" + "." * self._puntos)
+
+    def _cancelar_chat(self):
+        if self._worker is None:
+            return
+        self._generacion_cancelada = True
+        self._worker.cancelar()
+        self._timer_pensando.stop()
+        self.boton_cancelar_chat.setEnabled(False)
+        self.estado.setText("Cancelando: se descartará la respuesta. La conexión en curso debe terminar o agotar su espera; tu mensaje y capturas se conservan.")
 
     def _al_responder(self, mensaje: str, respuesta: RespuestaGemini) -> None:
+        if getattr(self, "_generacion_cancelada", False):
+            self.estado.setText("Generación cancelada. Puedes editar y volver a enviar.")
+            return
         self._timer_pensando.stop()
         self.estado.setText(f"Respuesta de {respuesta.modelo}")
         self._ultima_respuesta = respuesta.texto
@@ -870,10 +1006,15 @@ class AssistantView(QWidget):
 
     def _al_error(self, mensaje: str) -> None:
         self._timer_pensando.stop()
-        self.estado.setText("No se pudo generar")
+        if getattr(self, "_generacion_cancelada", False):
+            self.estado.setText("Generación cancelada. Mensaje y capturas conservados.")
+            return
+        self.estado.setText(f"No se pudo generar: {mensaje[:500]}")
+        self.estado.setToolTip(mensaje)
         self._agregar_burbuja("model", f"No pude completar la solicitud.\n\n{mensaje}")
 
     def _liberar_worker(self) -> None:
+        self.boton_cancelar_chat.setEnabled(False)
         if self._worker is not None:
             self._worker.deleteLater()
         self._worker = None

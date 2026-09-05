@@ -1,4 +1,15 @@
 @echo off
+setlocal DisableDelayedExpansion
+
+REM Desde el repositorio solo actualiza el acceso a la version actual.
+REM Salir ANTES de la reinstalacion evita borrar una instalacion existente.
+if exist "%~dp0..\app\main.py" if exist "%~dp0..\tools\crear_acceso_directo.ps1" goto acceso_proyecto
+if not exist "%~dp0LaAutomate.exe" (
+    echo ERROR: no se encontro LaAutomate.exe ni una copia del proyecto.
+    echo No se modifico la instalacion existente.
+    pause
+    exit /b 1
+)
 setlocal enabledelayedexpansion
 
 echo ============================================
@@ -163,13 +174,32 @@ if not exist "%DESTINO%\practicas_aprendidas.md" (
 
 echo Creando acceso directo en el escritorio...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference = 'Stop';" ^
+  "$desktop = [Environment]::GetFolderPath('Desktop');" ^
+  "if (-not $desktop -or -not (Test-Path -LiteralPath $desktop -PathType Container)) { throw 'No se pudo localizar el escritorio real' };" ^
+  "$target = Join-Path $env:DESTINO 'LaAutomate.exe';" ^
+  "if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw 'No se copio LaAutomate.exe' };" ^
+  "$icon = $target + ',0';" ^
+  "$ico = Join-Path $env:DESTINO '_internal\app\resources\app_icon.ico';" ^
+  "if (Test-Path -LiteralPath $ico -PathType Leaf) { $icon = $ico + ',0' };" ^
+  "$link = Join-Path $desktop 'LaAutomate.lnk';" ^
   "$w = New-Object -ComObject WScript.Shell;" ^
-  "$s = $w.CreateShortcut('%ESCRITORIO%\LaAutomate.lnk');" ^
-  "$s.TargetPath = '%DESTINO%\LaAutomate.exe';" ^
-  "$s.WorkingDirectory = '%DESTINO%';" ^
-  "$s.IconLocation = '%DESTINO%\LaAutomate.exe,0';" ^
+  "$s = $w.CreateShortcut($link);" ^
+  "$s.TargetPath = $target;" ^
+  "$s.Arguments = '';" ^
+  "$s.WorkingDirectory = $env:DESTINO;" ^
+  "$s.IconLocation = $icon;" ^
   "$s.Description = 'LaAutomate - RPA de codigo';" ^
-  "$s.Save()" >nul 2>&1
+  "$s.WindowStyle = 1; $s.Save();" ^
+  "$v = $w.CreateShortcut($link);" ^
+  "if ($v.TargetPath -ne $target -or $v.WorkingDirectory -ne $env:DESTINO -or $v.Arguments -ne '' -or $v.IconLocation -ne $icon) { throw 'El acceso directo no conservo su configuracion' };" ^
+  "Write-Output ('Acceso verificado: ' + $link)"
+if errorlevel 1 (
+    echo ERROR: no se pudo crear o verificar el acceso directo.
+    echo Los archivos instalados y respaldos se conservaron.
+    pause
+    exit /b 1
+)
 
 REM La instalacion vieja se borra SOLO si sus automatizaciones ya se
 REM migraron (o si no tenia ninguna). Si tenia automatizaciones propias y
@@ -215,3 +245,20 @@ if defined PREVIA (
 )
 echo.
 pause
+exit /b 0
+
+:acceso_proyecto
+echo Creando acceso a la version actual del proyecto...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\tools\crear_acceso_directo.ps1"
+if errorlevel 1 (
+    echo.
+    echo ERROR: no se pudo crear el acceso. Revisa el mensaje anterior.
+    echo El proyecto requiere .venv\Scripts\pythonw.exe y su icono.
+    pause
+    exit /b 1
+)
+echo.
+echo Listo. Abre LaAutomate desde el acceso directo del escritorio.
+echo No muevas ni borres esta copia del proyecto: el acceso depende de ella.
+pause
+exit /b 0

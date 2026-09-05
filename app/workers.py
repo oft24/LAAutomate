@@ -97,6 +97,7 @@ class AutomationWorker(QThread):
             max_intentos=self.max_intentos or MAX_INTENTOS,
             on_progreso=self.log_line.emit,
             cancelado=self._cancelado.is_set,
+            mejorar_prompt=False,
         )
         reparacion = corrector.ejecutar(self.spec)
         self.reparado.emit(reparacion)

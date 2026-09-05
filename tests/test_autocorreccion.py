@@ -152,6 +152,8 @@ def _con_respuesta(monkeypatch, *respuestas):
     pendientes = list(respuestas)
 
     class _ClienteFalso:
+        def comprobar_disponibilidad(self):
+            pass
         def __init__(self, *a, **k):
             pass
 
@@ -402,6 +404,8 @@ def test_si_el_modelo_se_satura_se_prueba_con_otro(sin_efectos, monkeypatch) -> 
     usados: list[str] = []
 
     class _ClienteQueSeSatura:
+        def comprobar_disponibilidad(self):
+            pass
         def __init__(self, modelo=None, *a, **k):
             self.modelo = modelo
 
@@ -432,6 +436,8 @@ def test_un_error_que_no_es_saturacion_no_prueba_otros_modelos(sin_efectos, monk
     llamadas: list[str] = []
 
     class _ClienteConClaveMala:
+        def comprobar_disponibilidad(self):
+            pass
         def __init__(self, modelo=None, *a, **k):
             self.modelo = modelo
 

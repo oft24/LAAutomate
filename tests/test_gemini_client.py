@@ -46,8 +46,9 @@ def test_gemini_envia_clave_en_header_y_captura_inline(tmp_path) -> None:
     assert "clave-prueba" not in url
     assert opciones["headers"]["x-goog-api-key"] == "clave-prueba"
     partes = opciones["json"]["contents"][-1]["parts"]
-    assert partes[0]["inline_data"]["mime_type"] == "image/png"
-    assert base64.b64decode(partes[0]["inline_data"]["data"]) == captura.read_bytes()
+    assert "Captura 1" in partes[0]["text"]
+    assert partes[1]["inline_data"]["mime_type"] == "image/png"
+    assert base64.b64decode(partes[1]["inline_data"]["data"]) == captura.read_bytes()
     assert "acciones permitidas" in partes[-1]["text"]
     assert respuesta.texto == "respuesta lista"
     assert respuesta.tokens_entrada == 42
@@ -56,6 +57,27 @@ def test_gemini_envia_clave_en_header_y_captura_inline(tmp_path) -> None:
 def test_gemini_rechaza_modelo_que_podria_manipular_url() -> None:
     with pytest.raises(ErrorGemini, match="modelo"):
         GeminiClient(api_key="x", modelo="modelo/../../otro")
+
+
+def test_cancelacion_previa_no_envia_peticion():
+    import threading
+    evento = threading.Event()
+    evento.set()
+    sesion = _SesionFalsa()
+    with pytest.raises(ErrorGemini, match="cancelada"):
+        GeminiClient(api_key="x", modelo="prueba", session=sesion).generar("hola", cancelado=evento)
+    assert sesion.llamada is None
+
+
+def test_cancelacion_durante_peticion_descarta_resultado():
+    import threading
+    evento = threading.Event()
+    class Sesion(_SesionFalsa):
+        def post(self, *args, **kwargs):
+            evento.set()
+            return _RespuestaFalsa()
+    with pytest.raises(ErrorGemini, match="cancelada"):
+        GeminiClient(api_key="x", modelo="prueba", session=Sesion()).generar("hola", cancelado=evento)
 
 
 def test_extrae_unico_bloque_python() -> None:

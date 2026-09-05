@@ -147,6 +147,23 @@ class WebActions:
         self.logger.info("Navegando a %s", url)
         self.driver.get(url)
 
+    def guardar_imagen_resultado(self, destino: str | Path) -> Path:
+        """Guarda en PNG una imagen visible del resultado, no la página completa.
+
+        Conserva la resolución mostrada; no afirma descargar el original.
+        """
+        def encontrar(driver):
+            for imagen in driver.find_elements(By.CSS_SELECTOR, "main img"):
+                if imagen.is_displayed() and imagen.size["width"] >= 150 and imagen.size["height"] >= 100:
+                    return imagen
+            return False
+        imagen = self._wait().until(encontrar)
+        destino = Path(destino)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        if not imagen.screenshot(str(destino)):
+            raise RuntimeError("No se pudo guardar la imagen visible del resultado.")
+        return destino
+
     def click(self, selector: str, by: str = By.CSS_SELECTOR) -> None:
         el = self._wait().until(EC.element_to_be_clickable((by, selector)))
         el.click()

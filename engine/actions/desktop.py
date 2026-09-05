@@ -6,6 +6,8 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes as wintypes
 import re
+import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -173,10 +175,17 @@ class DesktopActions:
         self._app = None
         self._ventana = None
 
-    def iniciar_o_conectar(self, comando: str, titulo_regex: str, tiempo_espera: int = 20):
+    def iniciar_o_conectar(self, comando: str, titulo_regex: str, tiempo_espera: int = 20,
+                          nombre_aplicacion: str | None = None):
         """Conecta con una ventana ya abierta que haga match con `titulo_regex`;
         si no la encuentra, lanza `comando` y espera a que aparezca."""
         from pywinauto import Application
+
+        if not isinstance(tiempo_espera, (int, float)) or not 0 < tiempo_espera <= 120:
+            raise ValueError("tiempo_espera debe estar entre 0 y 120 segundos.")
+        if not titulo_regex or not titulo_regex.strip():
+            raise ValueError("Indica un título de ventana específico antes de abrir la aplicación.")
+        re.compile(titulo_regex)  # Fallar antes del lanzamiento si el patrón es inválido.
 
         if self._intentar_atajo(titulo_regex=titulo_regex):
             self.logger.info("Conectado a ventana existente (%s)", titulo_regex)
@@ -196,20 +205,74 @@ class DesktopActions:
             self._ventana.set_focus()
             return self._ventana
 
-        self.logger.info("No estaba abierta, iniciando: %s", comando)
-        subprocess.Popen(comando, shell=True)
+        if self._atajo_tras_despertar(titulo_regex=titulo_regex):
+            return self._ventana
+        self.logger.info("No estaba abierta; buscando cómo iniciar %s", nombre_aplicacion or comando)
+        self._lanzar_aplicacion(comando, nombre_aplicacion)
         # Tras lanzarla se reintenta el atajo unos segundos: la ventana
         # nueva aparece en EnumWindows antes de que UIA la indexe.
-        fin = time.time() + tiempo_espera
-        while time.time() < fin:
+        fin = time.monotonic() + tiempo_espera
+        while time.monotonic() < fin:
             if self._intentar_atajo(titulo_regex=titulo_regex):
                 return self._ventana
             time.sleep(0.5)
 
-        self._app = Application(backend="uia").connect(title_re=titulo_regex, timeout=tiempo_espera)
-        self._ventana = self._app.window(title_re=titulo_regex)
-        self._ventana.set_focus()
-        return self._ventana
+        raise TimeoutError(f"Se inició la aplicación, pero no apareció una ventana utilizable ({titulo_regex}) en {tiempo_espera} s. Revisa actualizaciones, inicio de sesión o diálogos pendientes.")
+
+    @staticmethod
+    def _accesos_inicio(nombre: str) -> list[Path]:
+        """Busca coincidencias exactas en los accesos instalados del menú Inicio.
+
+        No abre resultados web ni ejecutables descargados encontrados al azar.
+        """
+        coincidencias = []
+        for variable in ("APPDATA", "PROGRAMDATA"):
+            base = os.environ.get(variable)
+            if not base:
+                continue
+            carpeta = Path(base) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+            if carpeta.is_dir():
+                coincidencias.extend(p for p in carpeta.rglob("*.lnk")
+                                     if p.stem.casefold() == nombre.casefold())
+        return coincidencias
+
+    def _lanzar_aplicacion(self, comando: str, nombre: str | None):
+        comando = comando.strip()
+        simple = bool(re.fullmatch(r"[\w.-]+", comando))
+        # Un nombre como 'discord' no suele estar en PATH. Busca el acceso
+        # del menú Inicio, igual que al buscar la aplicación instalada en Windows.
+        if simple and shutil.which(comando) is None:
+            nombre = nombre or Path(comando).stem
+            accesos = self._accesos_inicio(nombre)
+            if len(accesos) > 1 and nombre.casefold() == "discord":
+                # Discord deja un acceso a app-VERSION y otro a Update.exe.
+                # Prefiere únicamente su lanzador estándar, con destino existente.
+                import pythoncom
+                from win32com.client import Dispatch
+                pythoncom.CoInitialize()
+                try:
+                    shell = Dispatch("WScript.Shell")
+                    lanzadores = []
+                    for acceso in accesos:
+                        enlace = shell.CreateShortcut(str(acceso))
+                        destino = Path(enlace.TargetPath)
+                        if (destino.is_file() and destino.name.casefold() == "update.exe"
+                                and str(enlace.Arguments).strip().casefold() == "--processstart discord.exe"):
+                            lanzadores.append(acceso)
+                    if len(lanzadores) == 1:
+                        accesos = lanzadores
+                except Exception as exc:
+                    raise RuntimeError("No se pudieron verificar los accesos de Discord. Configura DISCORD_COMANDO con su lanzador real.") from exc
+                finally:
+                    pythoncom.CoUninitialize()
+            if len(accesos) != 1:
+                raise RuntimeError(f"No se encontró un acceso único para {nombre} en Inicio ({len(accesos)} coincidencias). Configura la ruta/comando real; no se abrió ningún resultado ambiguo.")
+            os.startfile(str(accesos[0]))
+            return
+        if not comando:
+            raise ValueError("Falta el comando de la aplicación.")
+        # CreateProcess, sin shell: no interpreta comandos concatenados.
+        subprocess.Popen(comando, shell=False)
 
     def _intentar_atajo(self, titulo_regex: str | None = None, clase: str | None = None) -> bool:
         """Conecta por handle si se puede; deja self._app/_ventana listos.
@@ -400,8 +463,10 @@ class DesktopActions:
             criterios["found_index"] = found_index
         control = self._resolver_control(**criterios)
         control.click_input(button_down=True, button_up=False)
-        time.sleep(pausa)
-        control.click_input(button_down=False, button_up=True)
+        try:
+            time.sleep(pausa)
+        finally:
+            control.click_input(button_down=False, button_up=True)
 
     def click_por_tipo(
         self, control_type: str, found_index: int | None = None, pausa: float = 0.08
@@ -427,8 +492,10 @@ class DesktopActions:
             criterios["found_index"] = found_index
         control = self._resolver_control(**criterios)
         control.click_input(button_down=True, button_up=False)
-        time.sleep(pausa)
-        control.click_input(button_down=False, button_up=True)
+        try:
+            time.sleep(pausa)
+        finally:
+            control.click_input(button_down=False, button_up=True)
 
     def click_en(self, x: int, y: int, pausa: float = 0.08) -> None:
         """Click en coordenadas relativas al AREA CLIENTE de la ventana ya
@@ -455,8 +522,93 @@ class DesktopActions:
         self._requiere_ventana()
         x_pantalla, y_pantalla = win32gui.ClientToScreen(self._ventana.handle, (x, y))
         self._ventana.click_input(coords=(x_pantalla, y_pantalla), absolute=True, button_down=True, button_up=False)
-        time.sleep(pausa)
-        self._ventana.click_input(coords=(x_pantalla, y_pantalla), absolute=True, button_down=False, button_up=True)
+        try:
+            time.sleep(pausa)
+        finally:
+            self._ventana.click_input(coords=(x_pantalla, y_pantalla), absolute=True, button_down=False, button_up=True)
+
+    def preparar_archivos_dialogo(self, rutas: list[Path]) -> None:
+        """Selecciona archivos en el diálogo nativo YA abierto por la persona.
+
+        No navega canales, no abre el diálogo y nunca pulsa Enter en la app.
+        Rechaza diálogos que no pertenezcan al proceso de la ventana conectada.
+        Solo admite el selector estándar (#32770, File name 1148, Open 1).
+        """
+        import win32process
+        from pywinauto import Desktop
+
+        self._requiere_ventana()
+        archivos = [Path(r).resolve(strict=True) for r in rutas]
+        if not archivos or any(not r.is_file() or '"' in str(r) for r in archivos):
+            raise ValueError("Selecciona archivos locales válidos.")
+        pid_app = win32process.GetWindowThreadProcessId(self._ventana.handle)[1]
+        candidatos = Desktop(backend="uia").windows(process=pid_app, class_name="#32770", visible_only=True)
+        if len(candidatos) != 1:
+            raise RuntimeError("Abre un único diálogo Adjuntar archivo en el canal correcto; no se seleccionaron archivos.")
+        hwnd = candidatos[0].handle
+        if win32process.GetWindowThreadProcessId(hwnd)[1] != pid_app:
+            raise RuntimeError("El selector activo no pertenece a la aplicación conectada; no se escribió nada.")
+        dialogo = Desktop(backend="uia").window(handle=hwnd)
+        dialogo.set_focus()
+        campo = dialogo.child_window(auto_id="1148", control_type="Edit").wrapper_object()
+        abrir = dialogo.child_window(auto_id="1", control_type="Button").wrapper_object()
+        if not campo.is_enabled() or not abrir.is_enabled():
+            raise RuntimeError("El selector no está listo para recibir archivos.")
+        if win32gui.GetForegroundWindow() != hwnd:
+            raise RuntimeError("No se pudo enfocar el selector de archivos.")
+        campo.set_edit_text(" ".join(f'"{r}"' for r in archivos))
+        if win32gui.GetForegroundWindow() != hwnd:
+            raise RuntimeError("Cambió la ventana activa. Selección preparada, pero no confirmada.")
+        # Invoke sobre el botón identificado: no envía teclas ni eventos de mouse a Discord.
+        abrir.invoke()
+        self.logger.info("Archivos seleccionados en el diálogo. Revisa la vista previa y el destino; no se pulsó Enviar.")
+
+    def enviar_imagen_discord(self, ruta: str | Path, timeout: float = 20) -> bool:
+        """Pega un archivo en el canal conectado y envía tras detectar la vista previa.
+
+        True solo si aparece un enlace nuevo al archivo. False tras Enter implica
+        resultado incierto: NO reintentar automáticamente para evitar duplicados.
+        Cambia el portapapeles a una lista de archivos, no al texto de su ruta.
+        """
+        import struct
+        import win32clipboard
+        from core.gemini_client import validar_capturas
+
+        self._requiere_ventana()
+        ruta = Path(ruta).resolve(strict=True)
+        validar_capturas([ruta])
+        def enlaces():
+            return sum(ruta.name.lower() in c.window_text().lower()
+                       for c in self._ventana.descendants(control_type="Hyperlink"))
+        antes = enlaces()
+        # DROPFILES: encabezado de 20 bytes, lista UTF-16 terminada en doble NUL.
+        datos = struct.pack("<IiiII", 20, 0, 0, 0, 1) + (str(ruta) + "\0\0").encode("utf-16le")
+        self._ventana.set_focus()
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_HDROP, datos)
+        finally:
+            win32clipboard.CloseClipboard()
+        self.atajo("^v")
+        limite = time.monotonic() + timeout
+        while time.monotonic() < limite:
+            nombres = [c.window_text() for c in self._ventana.descendants()]
+            if any(ruta.name.lower() in nombre.lower() for nombre in nombres):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("No se detectó la vista previa del archivo: no se pulsó Enviar.")
+        self.atajo("{ENTER}")
+        limite = time.monotonic() + timeout
+        while time.monotonic() < limite:
+            try:
+                if enlaces() > antes:
+                    return True
+            except Exception:
+                pass  # Un árbol UIA transitorio no autoriza un segundo envío.
+            time.sleep(0.2)
+        return False
 
     def click_por_imagen(self, ruta_imagen: str, confianza: float = 0.9, pausa: float = 0.08) -> None:
         """Busca la imagen SOLO dentro del area de la ventana ya conectada,
@@ -501,8 +653,10 @@ class DesktopActions:
         x, y = cx + offset_x, cy + offset_y
 
         pyautogui.mouseDown(x, y)
-        time.sleep(pausa)
-        pyautogui.mouseUp(x, y)
+        try:
+            time.sleep(pausa)
+        finally:
+            pyautogui.mouseUp(x, y)
 
     def capturar_pantalla(self, nombre: str) -> Path:
         import pyautogui

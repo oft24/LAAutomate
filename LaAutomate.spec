@@ -12,6 +12,7 @@ datas = [
     ('docs/PROMPT_REPARACION.md', 'docs'),
     ('docs/arquitectura.md', 'docs'),
     ('docs/acciones.md', 'docs'),
+    ('docs/precondiciones-apps.md', 'docs'),
     ('docs/logica-grabadora.md', 'docs'),
 ]
 binaries = []

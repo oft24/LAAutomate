@@ -90,10 +90,27 @@ def test_respuesta_muestra_codigo_separado(asistente):
     assert asistente.boton_crear.isEnabled()
     assert not asistente.entrada.toPlainText()
 
+
+def test_cancelar_descarta_respuesta_y_conserva_texto(asistente):
+    asistente.entrada.setPlainText("Mi solicitud")
+    asistente._enviar()
+    asistente._cancelar_chat()
+    asistente._worker.cancelar.assert_called_once()
+    asistente._al_responder("Mi solicitud", SimpleNamespace(texto="respuesta tardía", modelo="prueba"))
+    asistente._liberar_worker()
+    assert asistente.entrada.toPlainText() == "Mi solicitud"
+    assert not asistente._historial
+    assert asistente.boton_enviar.isEnabled()
+    assert not asistente.boton_cancelar_chat.isEnabled()
+
 def test_captura_inexistente_no_bloquea_formulario(asistente, tmp_path):
     asistente._capturas = [tmp_path / "no-existe.png"]
     asistente.entrada.setPlainText("Revisa esto")
     asistente._enviar()
+    # La lectura ahora ocurre en el worker, nunca en el hilo de la ventana.
+    assert asistente._worker is not None
+    asistente._al_error("No encuentro la captura: no-existe.png")
+    asistente._liberar_worker()
     assert asistente._worker is None
     assert asistente.boton_enviar.isEnabled()
     assert asistente.entrada.toPlainText() == "Revisa esto"

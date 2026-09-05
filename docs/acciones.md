@@ -246,3 +246,26 @@ mandar, porque enviar el mensaje al chat equivocado no se puede deshacer.
 - [[escribir-automatizaciones]] - donde se usan estas acciones
 - [[logica-grabadora]] - la grabadora genera llamadas a estas mismas acciones
 - [[arquitectura]] - quien las inyecta y cuando
+# Adjuntos automáticos de Discord
+
+`self.web.guardar_imagen_resultado(destino)` guarda en PNG el primer elemento
+`main img` visible de tamaño suficiente del resultado actual. No descarga el
+original ni valida semánticamente la imagen. Falla si no identifica un resultado.
+
+`self.escritorio.enviar_imagen_discord(ruta, timeout=20)` requiere que Discord
+ya esté conectado y en el canal correcto. Pega el archivo mediante portapapeles,
+espera su vista previa y pulsa Enter sin confirmación manual. Devuelve True solo
+si aparece un nuevo enlace al adjunto. False significa envío incierto: marcar
+`data={"requiere_revision": True}` y NO repetir la acción automáticamente.
+No prometer envío confirmado solo porque se pulsó Enter.
+# Abrir aplicaciones antes de interactuar
+
+`self.escritorio.iniciar_o_conectar(comando, titulo_regex, tiempo_espera=30,
+nombre_aplicacion="Discord")` reutiliza ventanas abiertas y despierta ventanas
+suspendidas. Si falta la ventana, inicia el comando sin shell. Un nombre simple
+no disponible en PATH se busca exactamente entre los accesos del menú Inicio.
+Para los dos accesos habituales de Discord se prefiere Update.exe con
+`--processStart Discord.exe`; otros resultados ambiguos requieren configuración.
+La espera de aparición no se repite con otro timeout al terminar. Esto no inicia
+sesión ni resuelve actualizaciones o permisos: el flujo debe validar el estado
+destino antes de efectuar acciones de negocio.
