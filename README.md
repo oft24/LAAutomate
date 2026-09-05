@@ -19,10 +19,15 @@ IA y la autocorrección envían el contenido que confirmes al API de Gemini.
 
 ### Opción 1 — Instalador listo para usar (recomendada)
 
+**[Descargar LaAutomate para Windows x64](https://github.com/oft24/LAAutomate/releases/latest/download/LaAutomate-Windows-x64.zip)** · [Ver versiones publicadas](https://github.com/oft24/LAAutomate/releases)
+
+Requiere Windows 10/11 de 64 bits. No necesitas Python ni una cuenta de GitHub
+para descargar el instalador. La clave de Gemini es opcional.
+
 1. Abre la página de [Releases de LaAutomate](https://github.com/oft24/LAAutomate/releases).
 2. En la versión más reciente, descarga **`LaAutomate-Windows-x64.zip`**.
-3. Extrae el ZIP completo. No separes `LaAutomate.exe` de la carpeta `_internal`.
-4. Dentro de la carpeta extraída, ejecuta **`INSTALL.bat`**.
+3. Haz clic derecho sobre el ZIP → **Extraer todo**. Abre la carpeta `LaAutomate` resultante. No separes `LaAutomate.exe` de la carpeta `_internal`.
+4. Cierra LaAutomate si estaba abierta y ejecuta **`INSTALL.bat`** desde la carpeta extraída, no desde el ZIP.
 5. Abre **LaAutomate** desde el acceso directo creado en el escritorio.
 
 Esta opción no requiere instalar Python. La aplicación se copia a
@@ -32,8 +37,18 @@ SmartScreen muestra una advertencia porque el ejecutable todavía no está firma
 revisa que el archivo proceda de este repositorio antes de elegir **Más información
 → Ejecutar de todas formas**.
 
-> Si la página de Releases todavía no muestra un ZIP, usa la opción 2. El código
-> del repositorio no contiene `dist/` ni un ejecutable precompilado.
+> Descarga el archivo **LaAutomate-Windows-x64.zip**, no **Source code (zip)**:
+> este último contiene código fuente y requiere la opción 2.
+> El repositorio no contiene `dist/` ni el ejecutable; ambos se distribuyen en Releases.
+
+### Si algo falla al instalar
+
+- **No aparece INSTALL.bat:** comprueba que descargaste el ZIP de Windows de la Release y extraíste su carpeta completa.
+- **Falta _internal o una DLL:** vuelve a extraer el paquete completo; el ejecutable no funciona separado de sus dependencias.
+- **No aparece el acceso directo:** conserva el mensaje del instalador. Puedes abrir `LaAutomate.exe` en `%LOCALAPPDATA%\LaAutomate` si la copia terminó correctamente.
+- **El navegador no inicia:** instala Chrome o Edge y permite conexión a internet para que Selenium obtenga su controlador en la primera ejecución.
+- **Gemini no responde:** la clave y disponibilidad del proveedor solo afectan las funciones de IA. Puedes abrir y usar las automatizaciones locales sin configurar Gemini.
+- **GitHub muestra una cruz roja junto al commit:** consulta el detalle en **Actions**. Indica el resultado de la construcción automática, no el estado de la descarga de una Release ya publicada. La Release v0.1.0 se construyó y publicó manualmente; su ZIP está disponible independientemente de ese trabajo.
 
 ### Opción 2 — Instalar desde el repositorio
 
