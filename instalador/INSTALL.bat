@@ -61,6 +61,40 @@ if defined PREVIA (
     echo Respaldando automatizaciones de: !PREVIA!
     xcopy "!PREVIA!\automations" "%RESPALDO%\automations\" /E /I /Q /Y >nul
     if exist "!PREVIA!\.env" copy "!PREVIA!\.env" "%RESPALDO%\.env" >nul
+    REM El historial, los logs y lo aprendido tambien viven dentro de la
+    REM carpeta que se borra. Sin esto, cada reinstalacion dejaba el
+    REM historial en blanco sin dar ningun error.
+    if exist "!PREVIA!\core\rpa.db" (
+        mkdir "%RESPALDO%\core" 2>nul
+        copy "!PREVIA!\core\rpa.db" "%RESPALDO%\core\rpa.db" >nul
+        echo   Historial de ejecuciones respaldado.
+    )
+    if exist "!PREVIA!\logs" xcopy "!PREVIA!\logs" "%RESPALDO%\logs\" /E /I /Q /Y >nul
+    REM datos\ son los Excel de entrada y salida de las automatizaciones.
+    REM Es lo mas irreemplazable de la instalacion: el codigo se vuelve a
+    REM empaquetar, una lista de personas escrita a mano no.
+    if exist "!PREVIA!\datos" (
+        xcopy "!PREVIA!\datos" "%RESPALDO%\datos\" /E /I /Q /Y >nul
+        echo   Carpeta datos respaldada.
+    )
+    REM La memoria del autocorrector vive junto al .exe, fuera de
+    REM _internal\, justo para que no se la lleve este borrado. El
+    REM PRACTICAS.md de _internal\ es el que trae la version: ese NO se
+    REM respalda, tiene que ganar el del paquete nuevo.
+    if exist "!PREVIA!\practicas_aprendidas.md" (
+        copy "!PREVIA!\practicas_aprendidas.md" "%RESPALDO%\practicas_aprendidas.md" >nul
+        echo   Practicas aprendidas respaldadas.
+    )
+    REM Instalaciones anteriores las guardaban dentro de _internal\. Se
+    REM conservan para que la app las mude sola, pero con OTRO nombre: el
+    REM PRACTICAS.md del paquete no se pisa nunca, o se perderian las
+    REM practicas nuevas que traiga la version.
+    if not exist "!PREVIA!\practicas_aprendidas.md" (
+        if exist "!PREVIA!\_internal\docs\PRACTICAS.md" (
+            copy "!PREVIA!\_internal\docs\PRACTICAS.md" "%RESPALDO%\practicas_por_migrar.md" >nul
+            echo   Practicas del formato anterior conservadas para migrarlas.
+        )
+    )
     set "ANTES=0"
     for /d %%D in ("!PREVIA!\automations\*") do set /a ANTES+=1
     echo   !ANTES! carpeta^(s^) respaldadas en: %RESPALDO%
@@ -93,6 +127,38 @@ if exist "%RESPALDO%\automations" (
 if exist "%RESPALDO%\.env" (
     echo Restaurando tu configuracion .env...
     copy "%RESPALDO%\.env" "%DESTINO%\.env" >nul
+)
+
+if exist "%RESPALDO%\core\rpa.db" (
+    echo Restaurando el historial de ejecuciones...
+    mkdir "%DESTINO%\core" 2>nul
+    copy "%RESPALDO%\core\rpa.db" "%DESTINO%\core\rpa.db" >nul
+)
+
+if exist "%RESPALDO%\logs" (
+    echo Restaurando los logs...
+    xcopy "%RESPALDO%\logs" "%DESTINO%\logs\" /E /I /Q /Y >nul
+)
+
+if exist "%RESPALDO%\datos" (
+    echo Restaurando tus datos...
+    xcopy "%RESPALDO%\datos" "%DESTINO%\datos\" /E /I /Q /Y >nul
+)
+
+REM Las practicas del paquete son la base; las aprendidas aqui son las que
+REM importan. Se restauran encima, no al reves.
+if exist "%RESPALDO%\practicas_aprendidas.md" (
+    echo Restaurando las practicas aprendidas...
+    copy "%RESPALDO%\practicas_aprendidas.md" "%DESTINO%\practicas_aprendidas.md" >nul
+)
+
+REM Formato viejo: se deja aparte y la app lo muda al arrancar. El
+REM PRACTICAS.md del paquete queda intacto.
+if not exist "%DESTINO%\practicas_aprendidas.md" (
+    if exist "%RESPALDO%\practicas_por_migrar.md" (
+        echo Dejando las practicas del formato anterior para migrarlas...
+        copy "%RESPALDO%\practicas_por_migrar.md" "%DESTINO%\practicas_por_migrar.md" >nul
+    )
 )
 
 echo Creando acceso directo en el escritorio...

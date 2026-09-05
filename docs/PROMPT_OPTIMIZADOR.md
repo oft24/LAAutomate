@@ -110,6 +110,26 @@ Nunca sobrescribas el prompt actual sin crear una versión nueva:
 `repair_prompt_v12` pasa a `repair_prompt_v13`. Incluye un changelog corto
 explicando exactamente qué mejoró.
 
+## Filtros que va a pasar tu respuesta
+
+`new_prompt` se rechaza automáticamente, sin que nadie lo lea, si:
+
+| Filtro | Límite |
+|---|---|
+| Longitud mínima | 2 000 caracteres. Por debajo, se asume que perdiste secciones |
+| Crecimiento máximo | 1,6 veces el prompt actual. Generalizar debería resumir |
+| Secciones obligatorias | Debe conservar `## Reglas de seguridad`, `## Salida obligatoria` y la cadena `"status"` |
+| Marcadores obligatorios | Debe conservar `{{MAX_REPAIR_ATTEMPTS}}`, `{{CURRENT_ATTEMPT}}` y `{{PREVIOUS_ATTEMPTS}}`, literalmente y sin sustituir |
+
+Ese último punto es el más fácil de romper. El prompt actual que recibes
+en `CURRENT_PROMPT` ya trae esos marcadores; el motor los sustituye en cada
+intento por el número de intento y el historial. Si tu versión nueva los
+pierde, el agente de reparación deja de saber en qué intento va y repite la
+misma corrección para siempre, sin que nada falle de forma visible.
+
+Copia el prompt completo y edita solo lo que mejoras. No lo reescribas de
+memoria.
+
 ## Salida obligatoria
 
 Devuelve **solo JSON válido**:

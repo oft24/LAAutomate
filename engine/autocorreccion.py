@@ -9,15 +9,14 @@ El ciclo por intento:
    el método `ejecutar`), guardarlo y recargar el módulo.
 5. Volver a correr.
 
-Como máximo 5 intentos. Y se para antes si el modelo devuelve el mismo
-código dos veces seguidas: insistir con un arreglo que no cambia nada solo
-gasta cuota y tiempo.
+Como máximo `MAX_INTENTOS` vueltas, y se para antes si el modelo
+devuelve el mismo código dos veces.
 
-**No corre solo en las ejecuciones programadas.** Que un cron reescriba
-código a las 3 de la mañana sin que nadie mire es una forma excelente de
-despertarse con una automatización que hace algo distinto de lo que
-hacía. Se activa en las ejecuciones manuales, donde hay una persona
-mirando el resultado.
+**Lo arranca una persona.** Lo dispara el botón "Corregir código" de la
+vista Automatizaciones, nunca un fallo por su cuenta y nunca el
+programador: un cron que reescribe código a las 3 de la mañana sin que
+nadie mire es una forma de despertarse con una automatización que hace
+algo distinto del que hacía.
 """
 from __future__ import annotations
 
@@ -48,13 +47,30 @@ from engine.registry import AutomationSpec, obtener
 
 logger = get_logger(__name__)
 
-MAX_INTENTOS = 5
+MAX_INTENTOS = 3
 
 # Dónde se guarda el rastro de cada reparación: las capturas de cada
 # intento y el código que se probó. Sobrevive a la sesión a propósito --
 # es lo que permite entender después por qué la automatización acabó
 # escrita como está.
 CARPETA_REPARACIONES = LOGS_DIR / "reparaciones"
+
+
+def _porcentaje(valor: object) -> int:
+    """La confianza del informe, como entero 0-100.
+
+    El prompt pide 0-100, pero los modelos devuelven `0.85` igual de a
+    menudo que `85`, y truncar convertía una confianza alta en un 0.
+    """
+    try:
+        numero = float(valor)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+    if numero != numero:  # NaN
+        return 0
+    if 0 < numero <= 1:
+        numero *= 100
+    return max(0, min(100, int(round(numero))))
 
 
 @dataclass
@@ -75,7 +91,7 @@ class Intento:
     evidencia: list[str] = field(default_factory=list)
     cambios: list[str] = field(default_factory=list)
     riesgo: str = ""
-    seguro: bool = True
+    seguro: bool = False   # safe_to_execute: sin declaracion explicita, no se aplica
     validacion: list[str] = field(default_factory=list)
     evitar_duplicados: list[str] = field(default_factory=list)
     practica: str = ""            # learning_candidate resumido
@@ -131,6 +147,7 @@ class Autocorrector:
         modelo: str | None = None,
         max_intentos: int = MAX_INTENTOS,
         on_progreso=None,
+        cancelado=None,
         mejorar_prompt: bool = True,
     ) -> None:
         self.runner = runner
@@ -147,6 +164,11 @@ class Autocorrector:
         # mientras pasa: una reparación tarda minutos y el silencio es
         # indistinguible de un cuelgue.
         self.on_progreso = on_progreso
+        # Se consulta en cada frontera del ciclo. La cancelacion por
+        # excepcion asincrona no entra mientras el hilo esta dentro de la
+        # llamada HTTP al modelo (hasta 120 s de timeout de lectura), asi
+        # que sin esto se empezaba otro intento despues de cancelar.
+        self.cancelado = cancelado or (lambda: False)
         # Mejorar el prompt cuesta una llamada extra. Se puede apagar para
         # una reparacion puntual sin gastarla.
         self.mejorar_prompt = mejorar_prompt
@@ -161,6 +183,9 @@ class Autocorrector:
         self._intentos_de_esta_sesion = reparacion.intentos
 
         for numero in range(1, self.max_intentos + 1):
+            if self.cancelado():
+                self._contar("Cancelado: no se empieza otro intento.")
+                break
             etiqueta = "" if numero == 1 else f"_intento{numero}"
             self._contar(f"Ejecutando {nombre} (intento {numero} de {self.max_intentos})…")
 
@@ -191,6 +216,11 @@ class Autocorrector:
             if not tiene_api_key():
                 intento.motivo_descarte = "no hay API key de Gemini configurada"
                 self._contar("Falló, pero no hay API key: no puedo intentar repararla.")
+                break
+
+            if self.cancelado():
+                intento.motivo_descarte = "cancelado por el usuario"
+                self._contar("Cancelado: no se pide el arreglo.")
                 break
 
             self._contar(f"Falló: {resultado.message[:120]}  →  pidiendo un arreglo…")
@@ -231,9 +261,6 @@ class Autocorrector:
             return False
 
         if not intento.seguro:
-            # El propio agente marcó la corrección como no segura. Aplicarla
-            # de todas formas anularía la única salvaguarda que el contrato
-            # le da para frenar cambios irreversibles.
             intento.motivo_descarte = (
                 f"el agente marcó la corrección como NO segura (riesgo {intento.riesgo or 'sin declarar'})"
             )
@@ -314,10 +341,7 @@ class Autocorrector:
         intento.aprendizaje = {k: str(v) for k, v in aprendizaje.items()}
         intento.practica = str(aprendizaje.get("successful_strategy") or "").strip()
 
-        try:
-            intento.confianza = max(0, min(100, int(float(informe.get("confidence", 0) or 0))))
-        except (TypeError, ValueError):
-            intento.confianza = 0
+        intento.confianza = _porcentaje(informe.get("confidence"))
 
         # `safe_to_execute` ausente se trata como NO seguro: la salvaguarda
         # debe fallar cerrada, no abierta.
@@ -482,11 +506,6 @@ class Autocorrector:
                 )
             )
         return "\n".join(lineas)
-
-    @staticmethod
-    def _lineas(texto: str) -> list[str]:
-        partes = [t.strip(" -*•\t") for t in texto.replace(";", "\n").splitlines()]
-        return [p for p in partes if p]
 
     @staticmethod
     def _capturas_de(resultado: AutomationResult) -> list[Path]:

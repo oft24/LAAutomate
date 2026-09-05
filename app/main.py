@@ -25,9 +25,23 @@ from engine.runner import Runner
 from engine.scheduler import Scheduler
 
 RUTA_ICONO = Path(__file__).resolve().parent / "resources" / "app_icon.ico"
+ID_APLICACION_WINDOWS = "oft24.LaAutomate.Desktop"
+
+
+def configurar_identidad_windows() -> bool:
+    """Evita que Windows agrupe la app bajo el icono genérico de Python."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    try:
+        return ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(ID_APLICACION_WINDOWS) == 0
+    except (AttributeError, OSError):
+        return False  # Un fallo cosmético no debe impedir abrir la aplicación.
 
 
 def main() -> None:
+    configurar_identidad_windows()
     descubrir()  # importa /automations y llena el registry via @registrar
 
     runner = Runner()
@@ -35,6 +49,7 @@ def main() -> None:
     scheduler.iniciar()
 
     app = QApplication(sys.argv)
+    app.setApplicationName("LaAutomate")
     app.setStyle("Fusion")
     if RUTA_ICONO.exists():
         app.setWindowIcon(QIcon(str(RUTA_ICONO)))

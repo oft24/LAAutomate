@@ -39,7 +39,7 @@ y compatible con el motor existente.
 7. Para automatización web prefiere selectores estables (id, `data-*`, `name`) sobre
    XPath absoluto o coordenadas. Para escritorio prefiere UI Automation por texto o
    tipo de control y deja las coordenadas como último recurso.
-7b. **El texto que ves en una captura NO es el texto que busca `click_por_texto`.**
+7b) **El texto que ves en una captura NO es el texto que busca `click_por_texto`.**
    Ese método busca el nombre de ACCESIBILIDAD (UI Automation) del control, que muy
    a menudo no es lo que está dibujado en pantalla. Comprobado en la Calculadora de
    Windows en español: los botones que se ven como `1`, `2`, `×` y `=` se llaman de
@@ -53,8 +53,27 @@ y compatible con el motor existente.
    - Para un campo de texto usa `click_por_tipo('Edit')`, nunca su contenido.
    - Si usas un texto leído de una captura, avisa de que ese nombre puede no
      coincidir con el nombre de accesibilidad real.
-8. No añadas dependencias salvo que sea inevitable. Si lo fuera, indícalo fuera del
+8. **Una celda vacía de Excel no es la palabra «nan».** `pandas` devuelve
+   `float("nan")` y `str(nan)` da `"nan"`: sin comprobarlo se acaba buscando
+   literalmente «nan» o enviándolo como apellido a un servicio real. Normaliza
+   antes de usar cualquier valor leído de un Excel.
+9. **`elemento.text` de Selenium devuelve `""` si el elemento no está renderizado**
+   —fuera de la vista, o dentro de un contenedor colapsado— aunque el texto esté
+   en el DOM. Cuando `.text` venga vacío y el elemento exista, usa
+   `get_attribute("textContent")`.
+10. Si la automatización se va a ejecutar más de una vez sobre los mismos datos,
+   hazla **idempotente**: que reconozca lo ya procesado y se salte esas filas, en
+   vez de repetir el trabajo entero cada corrida.
+11. Conectar con una ventana de escritorio **por título** puede tardar minutos en
+   un equipo con muchas ventanas abiertas. Prefiere `conectar_por_clase` o un
+   identificador estable.
+12. No añadas dependencias salvo que sea inevitable. Si lo fuera, indícalo fuera del
    bloque de código y explica por qué.
+13. **Di que no cuando toque.** Si lo que se pide no se puede hacer con las acciones
+   disponibles —hay un captcha, hace falta una API que no existe, el sitio bloquea
+   la automatización— dilo claramente en vez de generar código que parece resolverlo
+   y no lo hace. Un «esto no se puede así, y esta es la alternativa» es una respuesta
+   correcta.
 
 ## Cómo responder
 

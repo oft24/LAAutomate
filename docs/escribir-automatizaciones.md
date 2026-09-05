@@ -1,3 +1,8 @@
+---
+tags: [laautomate, guia, automatizaciones]
+alias: ["Escribir automatizaciones", "Guia de la clase base"]
+---
+
 # Escribir automatizaciones
 
 Una automatización es una carpeta dentro de `automations/` con dos archivos:
@@ -63,15 +68,13 @@ Se declaran en el decorador y los traduce `engine/scheduler.py`:
 @registrar(nombre="x", disparador="cron:*/15 * * * *")       # cada 15 minutos
 @registrar(nombre="x", disparador="cron:0 9 * * 1-5")        # 9:00 am, lunes a viernes
 @registrar(nombre="x", disparador="carpeta:C:/entradas")     # al crear un archivo ahí
-@registrar(nombre="x", disparador="webhook")                 # POST /webhook/x
-@registrar(nombre="x", disparador="correo")                  # al llegar correo nuevo
 ```
 
 El cron es el estándar de 5 campos: `minuto hora día-del-mes mes día-de-semana`.
 
-`webhook` y `correo` **no se conectan solos**: el disparador queda declarado, pero hay
-que registrarlo en `engine/triggers/webhook_listener.py` (servidor FastAPI local, por
-defecto en `127.0.0.1:8765`) o en `engine/triggers/email_watcher.py` (polling IMAP).
+Esos tres son los únicos que existen. Escribir otra cosa no da error al guardar: la
+automatización se registra, aparece en la lista y simplemente no se dispara nunca. El
+scheduler lo anota en el log como disparador desconocido.
 
 ## Credenciales
 
@@ -173,3 +176,12 @@ ejecutar", que recarga el módulo en caliente — sin reiniciar.
 
 Los logs quedan en `logs/mi_automatizacion.log`, y las capturas de los fallos en
 `logs/screenshots/`.
+
+---
+
+## Notas relacionadas
+
+- [[acciones]] - todo lo que puedes llamar desde `ejecutar()`
+- [[logica-grabadora]] - grabar en vez de escribir
+- [[asistente-ia]] - que lo escriba la IA
+- [[PRACTICAS]] - errores reales que conviene no repetir

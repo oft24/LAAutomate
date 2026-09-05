@@ -39,6 +39,13 @@ CHANGELOG = BASE_DIR / "docs" / "PROMPT_CHANGELOG.md"
 MAX_CRECIMIENTO = 1.6
 MIN_LARGO_PROMPT = 2_000
 
+# Huecos que `engine/autocorreccion.py` sustituye en cada intento.
+PLACEHOLDERS_OBLIGATORIOS = (
+    "{{MAX_REPAIR_ATTEMPTS}}",
+    "{{CURRENT_ATTEMPT}}",
+    "{{PREVIOUS_ATTEMPTS}}",
+)
+
 _PATRON_VERSION = re.compile(r"repair_prompt_v(\d+)")
 
 
@@ -118,6 +125,11 @@ def _es_aceptable(nuevo: str, anterior: str) -> tuple[bool, str]:
     for imprescindible in ("Reglas de seguridad", "Salida obligatoria", '"status"'):
         if imprescindible not in nuevo:
             return False, f"el prompt nuevo perdió la sección «{imprescindible}»"
+    # Sin estos huecos el agente deja de saber en qué intento va y qué ya se
+    # probó: repetiría la misma corrección para siempre, y en silencio.
+    for hueco in PLACEHOLDERS_OBLIGATORIOS:
+        if hueco not in nuevo:
+            return False, f"el prompt nuevo perdió el hueco {hueco}: el agente se quedaría sin contexto de intentos"
     return True, ""
 
 

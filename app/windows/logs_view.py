@@ -18,6 +18,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
@@ -66,6 +67,10 @@ class LogsView(QWidget):
         columna_lista = QVBoxLayout()
         columna_lista.setSpacing(ESPACIADO.sm)
         columna_lista.addWidget(self._subtitulo("Archivos en logs/"))
+        self.busqueda = QLineEdit()
+        self.busqueda.setPlaceholderText("Buscar archivo de registro…")
+        self.busqueda.textChanged.connect(self._filtrar)
+        columna_lista.addWidget(self.busqueda)
         self.lista = QListWidget()
         self.lista.setFixedWidth(276)
         self.lista.currentRowChanged.connect(self._al_cambiar_seleccion)
@@ -76,6 +81,10 @@ class LogsView(QWidget):
         columna_texto.setSpacing(ESPACIADO.sm)
         self.titulo_archivo = self._subtitulo("")
         columna_texto.addWidget(self.titulo_archivo)
+        self.buscar_texto = QLineEdit()
+        self.buscar_texto.setPlaceholderText("Buscar en el registro · Enter para siguiente coincidencia")
+        self.buscar_texto.returnPressed.connect(self._buscar_siguiente)
+        columna_texto.addWidget(self.buscar_texto)
         self.texto = QPlainTextEdit(readOnly=True)
         self.texto.setObjectName("consola")
         columna_texto.addWidget(self.texto, stretch=1)
@@ -132,6 +141,39 @@ class LogsView(QWidget):
                 indice = nombres.index(seleccionado.name)
         self.lista.setCurrentRow(indice)
         self._al_cambiar_seleccion(indice)
+        self._filtrar(self.busqueda.text())
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.refrescar()
+
+    def _filtrar(self, texto: str) -> None:
+        for indice in range(self.lista.count()):
+            item = self.lista.item(indice)
+            item.setHidden(texto.casefold() not in item.text().casefold())
+
+    def _buscar_siguiente(self) -> None:
+        texto = self.buscar_texto.text().strip()
+        if not texto:
+            return
+        if not self.texto.find(texto):
+            from PySide6.QtGui import QTextCursor
+            self.texto.moveCursor(QTextCursor.MoveOperation.Start)
+            if not self.texto.find(texto):
+                self.buscar_texto.setToolTip("No se encontró ese texto en las últimas líneas del registro.")
+
+    @staticmethod
+    def _leer_final(ruta: Path) -> tuple[str, bool]:
+        """Acota la lectura real, no solo el texto mostrado después."""
+        with ruta.open("rb") as archivo:
+            archivo.seek(0, 2)
+            tamano = archivo.tell()
+            archivo.seek(max(0, tamano - MAX_CARACTERES))
+            datos = archivo.read(MAX_CARACTERES)
+        texto = datos.decode("utf-8", errors="replace")
+        if tamano > MAX_CARACTERES and "\n" in texto:
+            texto = texto.split("\n", 1)[1]
+        return texto, tamano > MAX_CARACTERES
 
     def archivo_seleccionado(self) -> Path | None:
         fila = self.lista.currentRow()
@@ -170,8 +212,8 @@ class LogsView(QWidget):
     @staticmethod
     def _tiene_errores(ruta: Path) -> bool:
         try:
-            with ruta.open("r", encoding="utf-8", errors="ignore") as archivo:
-                return any("ERROR" in linea or "CRITICAL" in linea for linea in archivo)
+            texto, _ = LogsView._leer_final(ruta)
+            return "ERROR" in texto or "CRITICAL" in texto
         except OSError:
             return False
 
@@ -186,21 +228,16 @@ class LogsView(QWidget):
         ruta = self._rutas[fila]
         self.titulo_archivo.setText(ruta.name.upper())
         try:
-            contenido = ruta.read_text(encoding="utf-8", errors="ignore")
+            contenido, recortado = self._leer_final(ruta)
         except OSError as exc:
             self.texto.setPlainText(f"No se pudo leer {ruta}: {type(exc).__name__}: {exc}")
             return
 
-        if len(contenido) > MAX_CARACTERES:
-            contenido = "[…recortado: se muestran las últimas líneas…]\n" + contenido[-MAX_CARACTERES:]
+        if recortado:
+            contenido = "[…recortado: se muestran las últimas líneas…]\n" + contenido
         self.texto.setPlainText(contenido)
         barra = self.texto.verticalScrollBar()
         barra.setValue(barra.maximum())
-
-    # Nombre anterior del refresco, conservado porque otras partes de la app
-    # (y las pruebas) pueden seguir llamandolo.
-    def _cargar_ultimo_log(self) -> None:
-        self.refrescar()
 
     @staticmethod
     def _abrir_carpeta() -> None:

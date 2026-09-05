@@ -1,3 +1,8 @@
+---
+tags: [laautomate, historico]
+alias: ["Prompt original del proyecto"]
+---
+
 # Prompt para Codex
 
 > **Documento histórico.** Es el prompt con el que se especificó el proyecto y
@@ -96,3 +101,10 @@ arrastrar cajas, y sin el límite de conectores fijos.
   visual, cero XML/JSON de flujo — solo código Python.
 - Un fallo real (excepción en `ejecutar()`) queda registrado con traceback, genera
   un screenshot si había un `self.web` activo, y aparece como pill roja en la UI.
+
+---
+
+## Notas relacionadas
+
+- [[README]] - el estado actual, que es lo que hay que leer
+- [[arquitectura]] - como quedo de verdad

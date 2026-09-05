@@ -58,13 +58,15 @@ flowchart LR
     GE --> P
     P --> D[Detener y depurar pasos]
     D --> G[Generar código Python]
-    G --> A[automations/nombre/automation.py]
+    G --> B[Borrador editable]
+    B --> A[Guardar explícitamente: automations/nombre/automation.py]
     A --> R[Importar o recargar módulo]
     R --> V[Registry y vista Automatizaciones]
 ```
 
 La lista de pasos solo vive en memoria durante la grabación. No se escribe una
-acción a disco por cada evento. El archivo se genera y se guarda al detener.
+acción a disco por cada evento. Al detener se genera un borrador editable;
+el archivo solo se escribe al pulsar **Guardar automatización**.
 
 ## Máquina de estados de la vista
 
@@ -78,7 +80,8 @@ stateDiagram-v2
     Grabando --> Reposo: Cancelar (se descarta lo capturado)
     Deteniendo --> Generando: pasos entregados
     Deteniendo --> Error: detener falla
-    Generando --> Guardando: código válido
+    Generando --> Revisando: código generado
+    Revisando --> Guardando: Guardar automatización y validar
     Generando --> Error: nombre o generación inválida
     Guardando --> Completado: archivos e import correctos
     Guardando --> Error: escritura o import falla
@@ -292,7 +295,7 @@ consulta ahora tres fuentes y basta que una diga que sí:
 
 | Fuente | Cómo se obtiene | Para qué caso |
 |---|---|---|
-| Foco real de teclado | `GetGUIThreadInfo` (ctypes) → clase Win32 del control enfocado | Campo alcanzado con `Tab` o ya enfocado, sin click previo. |
+| Foco real de teclado | `GetGUIThreadInfo` (ctypes) -> clase Win32 del control enfocado | Campo alcanzado con `Tab` o ya enfocado, sin click previo. |
 | Clasificación UI Automation del último click | `_TIPOS_EDITABLES` | Controles nativos clásicos. |
 | Descarte por tipo | el último click **no** está en `_TIPOS_SIN_TEXTO` | Editores `Pane`/`Custom`/`Group` de apps web y remotas. |
 
@@ -310,7 +313,7 @@ haría imposible grabar el tecleo de un correo electrónico.
 virtual antes de traducirlo a carácter, y `VK_SPACE` está en su tabla de teclas
 especiales: `getattr(Key.space, "char")` es `None` aunque `Key.space.value.char`
 sí sea `" "`. El filtro de caracteres imprimibles la descartaba, y **todo** el
-texto llegaba pegado al `.py` generado (`"Reporte diario"` → `"Reportediario"`).
+texto llegaba pegado al `.py` generado (`"Reporte diario"` -> `"Reportediario"`).
 Se traduce explícitamente antes del filtro.
 
 **Otras teclas.** Las flechas, `Page Up/Down`, `Home`, `End` y `Tab` se guardan como
@@ -323,7 +326,8 @@ entra al buffer. El campo se reconoce por `IsPassword` de UI Automation en el cl
 **y** por el estilo `ES_PASSWORD` del control enfocado: cualquiera de los dos que diga
 que sí manda. Esa segunda vía es la que cubre el caso de llegar a la contraseña con
 `Tab` desde el campo de usuario, donde el último click seguía siendo el de usuario.
-Al finalizar, la UI ofrece guardar la contraseña en la Bóveda de Windows.
+Después de guardar explícitamente la automatización, la UI ofrece guardar
+la contraseña en la Bóveda de Windows.
 
 ---
 
@@ -337,7 +341,9 @@ de pestaña— se inserta con `repr()`, nunca crudo: viene de una aplicación o 
 página en la que no se puede confiar, y sin eso unas comillas o un salto de línea
 podrían convertirse en código Python ejecutable dentro del archivo generado.
 
-La vista escribe:
+Al pulsar **Guardar automatización**, la vista valida sintaxis, nombre y
+disparador. No sobrescribe una carpeta existente. Conserva el borrador si
+la validación falla. Después escribe:
 
 ```text
 automations/<nombre>/

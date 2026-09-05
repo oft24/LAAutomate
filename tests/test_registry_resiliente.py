@@ -61,7 +61,7 @@ def test_la_causa_del_fallo_queda_disponible_para_la_interfaz(automatizacion_rot
 
 
 def test_olvidar_error_limpia_la_marca_al_corregirla(automatizacion_rota) -> None:
-    """Tras arreglarla no debe seguir saliendo con el ⚠ de "no compila"
+    """Tras arreglarla no debe seguir saliendo con la marca de "no compila"
     hasta reiniciar -- ni mandarle al modelo un error que ya no existe."""
     descubrir()
     assert automatizacion_rota in errores_de_descubrimiento()

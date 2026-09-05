@@ -1,3 +1,8 @@
+---
+tags: [laautomate, ia, memoria]
+alias: ["Practicas aprendidas", "Memoria del autocorrector"]
+---
+
 # Prácticas de automatización aprendidas
 
 Este archivo **se inyecta en el prompt** cada vez que el autocorrector
@@ -151,4 +156,15 @@ nadie detecta.
      entera si hace falta. -->
 
 <!-- INICIO AUTOCORRECTOR -->
+
+- **2026-09-04 · la propia interfaz de LaAutomate** — Un boton de navegacion marcable (checkable) de Qt se expone como CheckBox, no como Button, y su nombre puede llevar espacios delante: usa click_por_texto con control_type='CheckBox' y compara con .strip(). (tras: ElementNotFoundError buscando control_type=Button)
+
 <!-- FIN AUTOCORRECTOR -->
+
+---
+
+## Notas relacionadas
+
+- [[autocorreccion]] - quien anade estas lineas
+- [[prompts]] - donde se inyectan
+- [[acciones]] - la referencia que estas practicas matizan

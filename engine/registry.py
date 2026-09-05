@@ -99,7 +99,7 @@ def olvidar_error(nombre: str) -> None:
 
     La llama `engine.almacen` cuando un automation.py vuelve a importarse
     bien tras corregirlo. Sin esto, una automatizacion arreglada seguiria
-    saliendo con el ⚠ de "no compila" hasta reiniciar la app -- y el
+    marcada como "no compila" hasta reiniciar la app -- y el
     Agente IA le seguiria mandando al modelo un error de import que ya no
     existe."""
     for modulo in [m for m in _ERRORES if m.split(".")[1:2] == [nombre]]:

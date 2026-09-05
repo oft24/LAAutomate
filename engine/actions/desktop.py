@@ -71,19 +71,15 @@ def _hwnds_que_coinciden(
 ) -> list[int]:
     """HWNDs cuyo titulo/clase hacen match, via EnumWindows de Win32.
 
-    EnumWindows ve TODAS las ventanas -- incluidas las minimizadas y las
-    'cloaked' que UI Automation esconde -- y es instantaneo. El match del
-    titulo se hace con re.match, el mismo criterio que `title_re` de
-    pywinauto.
+    EnumWindows es instantaneo y ve todas las ventanas, incluidas las
+    minimizadas y las 'cloaked' que UI Automation esconde. El titulo se
+    compara con re.match, igual que el `title_re` de pywinauto.
 
-    `solo_visibles` acota a lo que pywinauto consideraria: sus busquedas
-    van con visible_only/enabled_only/top_level_only, asi que sin este
-    filtro esta funcion encuentra MAS ventanas que el (fantasmas
-    invisibles, y las CoreWindow hijas que una app UWP cuelga de su
-    ApplicationFrameWindow con el mismo titulo). Se midio con la
-    Calculadora: sin filtrar salian 3 "Calculadora" y con filtro 1, que es
-    la real. `_despertar_ventana` NO lo usa a proposito -- ahi el objetivo
-    es justamente la ventana dormida que ya nadie ve.
+    `solo_visibles` acota a lo que pywinauto consideraria; sin el salen
+    fantasmas y las CoreWindow hijas de una app UWP. Medido con la
+    Calculadora: 3 coincidencias sin filtrar, 1 con filtro.
+    `_despertar_ventana` no lo usa a proposito: ahi el objetivo es
+    justamente la ventana que ya nadie ve.
     """
     candidatas: list[int] = []
 
@@ -117,25 +113,21 @@ def _hwnds_que_coinciden(
 def _conectar_rapido(titulo_regex: str | None = None, clase: str | None = None):
     """Conecta por HANDLE en vez de por titulo/clase, cuando se puede.
 
-    `Application(backend="uia").connect(title_re=...)` hace que UIA recorra
-    el escritorio entero buscando la ventana. En un equipo con muchas
-    ventanas abiertas eso no es lento: se CUELGA. Medido en una maquina con
-    389 ventanas de nivel superior (25 visibles con titulo):
+    `connect(title_re=...)` hace que UIA recorra el escritorio entero. Con
+    muchas ventanas abiertas no es lento: se cuelga. Medido con 389
+    ventanas de nivel superior:
 
         connect(handle=hwnd)             0.0 s
         connect(title_re="Calculadora")  no volvio en 2 minutos
 
-    Y ese cuelgue es especialmente malo aqui: el boton "Cancelar" de la
-    interfaz inyecta una excepcion con PyThreadState_SetAsyncExc, que solo
-    surte efecto en el siguiente bytecode de Python -- dentro de una
-    llamada C larga como esta no se puede interrumpir (ver app/workers.py).
-    El usuario se queda con una automatizacion congelada y sin salida.
+    Y el cuelgue no se puede cancelar: "Cancelar" inyecta la excepcion en
+    el siguiente bytecode, que nunca llega dentro de una llamada C larga
+    (ver app/workers.py).
 
-    Solo se usa el atajo cuando hay EXACTAMENTE una ventana que coincide.
-    Con varias, se deja pasar al camino de siempre para que pywinauto
-    lance su ElementAmbiguousError como hasta ahora, en vez de que este
-    codigo elija una por su cuenta y haga clicks en la ventana equivocada.
-    Devuelve None si no puede, y entonces el que llama sigue como antes.
+    El atajo solo se toma con EXACTAMENTE una coincidencia. Con varias se
+    sigue el camino de siempre, para que pywinauto lance su
+    ElementAmbiguousError en vez de que este codigo elija por su cuenta.
+    Devuelve None si no puede.
     """
     from pywinauto import Application
 
@@ -389,23 +381,18 @@ class DesktopActions:
         found_index: int | None = None,
         pausa: float = 0.08,
     ) -> None:
-        """Click con una pausa real entre el mouse-down y el mouse-up:
-        varias apps modernas (WinUI/XAML, ej. la Calculadora de Windows
-        11) descartan un click_input() de pywinauto porque manda ambos
-        eventos demasiado rapido y no lo distinguen de ruido -- se
-        confirmo en pruebas que sin esta pausa el click no tiene ningun
-        efecto, pese a aterrizar en el pixel correcto.
+        """Click con una pausa real entre el mouse-down y el mouse-up.
 
-        `control_type` es opcional: se usa como criterio EXTRA de
-        busqueda (ej. "Button") para evitar ElementAmbiguousError cuando
-        dos controles DISTINTOS comparten el mismo texto visible.
+        Las apps WinUI/XAML (la Calculadora de Windows 11) descartan un
+        `click_input()` de pywinauto porque manda los dos eventos
+        demasiado rapido. Sin la pausa el click no hace nada, aunque
+        aterrice en el pixel correcto.
 
-        `found_index` (0, 1, 2...) elige CUAL de los controles que hacen
-        match usar, para cuando texto+control_type siguen sin bastar (ej.
-        el mismo ícono de una app repetido en la barra de tareas de cada
-        monitor, con texto y tipo idénticos) -- suele requerir probar
-        manualmente cuál índice es el correcto, ya que pywinauto no
-        garantiza que el orden coincida con la posición visual."""
+        `control_type` (ej. "Button") es un criterio extra para evitar
+        ElementAmbiguousError cuando dos controles distintos comparten el
+        texto visible. `found_index` elige entre los que aun asi empatan;
+        hay que probar cual, porque pywinauto no garantiza que su orden
+        coincida con el visual."""
         criterios: dict = {"title": texto}
         if control_type:
             criterios["control_type"] = control_type

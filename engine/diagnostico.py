@@ -1,13 +1,7 @@
-"""Reunir el rastro de un fallo para que el Asistente pueda corregirlo.
+"""Reúne el rastro de un fallo: log, captura del momento y causa.
 
-El Asistente ya sabe generar automatizaciones desde capturas. Lo que le
-faltaba para CORREGIR era el contexto del fallo, que hoy hay que buscar a
-mano en tres sitios distintos: el log de la automatización, la captura que
-el runner tomó en el momento del error, y —si ni siquiera importa— la
-causa que registró el descubrimiento.
-
-Aquí se junta todo. No habla con Gemini ni con la interfaz: devuelve
-texto y rutas, así que se puede probar sin red y sin ventana.
+No habla con Gemini ni con la interfaz —devuelve texto y rutas— así que se
+puede probar sin red y sin ventana.
 """
 from __future__ import annotations
 

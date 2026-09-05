@@ -20,7 +20,7 @@ from app.widgets.step_track import StepTrack
 from app.widgets.toast import mostrar_toast
 from app.workers import AutomationWorker
 from core.config import LOGS_DIR
-from core.database import historial
+from core.database import historial, estadisticas_ejecuciones
 from engine.registry import listar, obtener
 
 REFRESCO_AUTOMATICO_MS = 10_000
@@ -49,7 +49,7 @@ class DashboardView(QWidget):
         fila_kpis.setSpacing(16)
         self.kpi_hoy = KpiCard("Ejecuciones hoy", "—", tono="cian")
         self.kpi_exito = KpiCard("Tasa de éxito (7 días)", "—", tono="acento")
-        self.kpi_duracion = KpiCard("Duración media", "—", tono="ocre")
+        self.kpi_duracion = KpiCard("Duración media (7 días)", "—", tono="ocre")
         self.kpi_proxima = KpiCard("Próxima ejecución", "—", tono="violeta")
         for kpi in (self.kpi_hoy, self.kpi_exito, self.kpi_duracion, self.kpi_proxima):
             fila_kpis.addWidget(kpi)
@@ -145,36 +145,19 @@ class DashboardView(QWidget):
         )
 
     def _actualizar_kpis(self, filas: list[FilaEjecucion]) -> None:
-        ahora = datetime.now(timezone.utc)
-        hoy = ahora.date()
-
-        def parsear(v: str | None) -> datetime | None:
-            if not v:
-                return None
-            try:
-                dt = datetime.fromisoformat(v)
-            except ValueError:
-                return None
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-        de_hoy = [f for f in filas if (dt := parsear(f.iniciado_en)) and dt.date() == hoy]
-        self.kpi_hoy.actualizar_valor(str(len(de_hoy)))
-
-        de_7_dias = [f for f in filas if (dt := parsear(f.iniciado_en)) and (ahora - dt).days < 7]
-        if de_7_dias:
-            tasa = sum(1 for f in de_7_dias if f.exito) / len(de_7_dias) * 100
+        resumen = estadisticas_ejecuciones()
+        self.kpi_hoy.actualizar_valor(str(resumen["hoy"]))
+        if resumen["total_7d"]:
+            tasa = resumen["exitos_7d"] / resumen["total_7d"] * 100
             self.kpi_exito.actualizar_valor(f"{tasa:.0f}%")
+            self.kpi_exito.actualizar_tono("error" if tasa < 50 else "ocre" if tasa < 90 else "acento")
+            self.kpi_exito.setToolTip(f'{resumen["exitos_7d"]} de {resumen["total_7d"]} ejecuciones completadas.')
         else:
             self.kpi_exito.actualizar_valor("—")
-
-        duraciones = []
-        for f in filas:
-            inicio, fin = parsear(f.iniciado_en), parsear(f.finalizado_en)
-            if inicio and fin:
-                duraciones.append((fin - inicio).total_seconds())
-        if duraciones:
-            promedio = sum(duraciones) / len(duraciones)
-            self.kpi_duracion.actualizar_valor(f"{promedio:.1f} s")
+            self.kpi_exito.actualizar_tono("neutro")
+            self.kpi_exito.setToolTip("Sin ejecuciones en los últimos 7 días.")
+        if resumen["duracion_7d"] is not None:
+            self.kpi_duracion.actualizar_valor(f'{resumen["duracion_7d"]:.1f} s')
         else:
             self.kpi_duracion.actualizar_valor("—")
 
@@ -215,6 +198,8 @@ class DashboardView(QWidget):
         # cual, no una sesion de reparacion. Esa vive en la vista
         # Automatizaciones, donde se ve el codigo que se va a cambiar.
         worker = AutomationWorker(self.runner, spec, autocorregir=False)
+        worker.setParent(self)
+        worker.finished.connect(worker.deleteLater)
         worker.finalizado.connect(lambda resultado: self._al_reintentar_terminado(nombre, resultado, worker))
         self._workers.append(worker)
         worker.start()

@@ -7,14 +7,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 from app.resources.iconos import icono
 from app.resources.tokens import COLORES, ESPACIADO
 from core.config import NOMBRE_APP
 
 # Iconos SVG de trazo (ver app/resources/iconos.py). Antes eran glifos
-# sueltos (⌂ ⚙ ◉ ◷ ▤ ▣ ◈) dentro del propio texto del boton: se veian
+# sueltos dentro del propio texto del boton: se veian
 # distinto segun la fuente que tuviera cada equipo y no podian tomar el
 # color del estado activo por separado del texto.
 # Cada item es (clave, icono, etiqueta). La CLAVE es como el resto de la
@@ -70,9 +70,8 @@ class Sidebar(QWidget):
         layout.setContentsMargins(ESPACIADO.sm, ESPACIADO.md, ESPACIADO.sm, ESPACIADO.lg)
         layout.setSpacing(2)
 
-        # La marca comparte fila con el boton de colapsar en vez de ocupar
-        # una linea propia: la sidebar ya es angosta y el nombre de la app
-        # no merece robarle altura a la navegacion.
+        # La marca queda libre; el control de colapso vive en el pie y no
+        # compite por los 56 px disponibles cuando el menú está contraído.
         fila_marca = QHBoxLayout()
         fila_marca.setContentsMargins(ESPACIADO.sm, 0, 0, 0)
         fila_marca.setSpacing(ESPACIADO.xs)
@@ -96,14 +95,16 @@ class Sidebar(QWidget):
         fila_marca.addWidget(self._marca)
         fila_marca.addStretch()
 
-        boton_colapsar = QPushButton()
-        boton_colapsar.setObjectName("navItem")
-        boton_colapsar.setFixedSize(28, 28)
+        boton_colapsar = QToolButton()
+        boton_colapsar.setObjectName("sidebarToggle")
+        boton_colapsar.setFixedSize(32, 32)
+        boton_colapsar.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        boton_colapsar.setToolTip("Contraer menú")
+        boton_colapsar.setAccessibleName("Contraer menú")
         boton_colapsar.setIconSize(QSize(14, 14))
         boton_colapsar.setIcon(icono("chevron_izq", COLORES.grafito, 14))
         boton_colapsar.clicked.connect(self._alternar_colapso)
         self._boton_colapsar = boton_colapsar
-        fila_marca.addWidget(boton_colapsar, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         layout.addLayout(fila_marca)
         layout.addSpacing(ESPACIADO.md)
@@ -123,7 +124,9 @@ class Sidebar(QWidget):
                 boton = QPushButton(self._texto_boton(texto))
                 boton.setObjectName("navItem")
                 boton.setCheckable(True)
-                boton.setFixedHeight(36)
+                boton.setFixedHeight(44)
+                boton.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+                boton.setProperty("compact", False)
                 boton.setIconSize(QSize(TAMANO_ICONO, TAMANO_ICONO))
                 idx_local = indice
                 boton.clicked.connect(lambda _checked=False, i=idx_local: self._seleccionar(i))
@@ -134,6 +137,11 @@ class Sidebar(QWidget):
             layout.addSpacing(ESPACIADO.md)
 
         layout.addStretch()
+        self._fila_control = QHBoxLayout()
+        self._fila_control.addStretch()
+        self._fila_control.addWidget(boton_colapsar)
+        self._fila_control.addStretch()
+        layout.addLayout(self._fila_control)
         self._seleccionar(0)
 
     def _texto_boton(self, texto: str) -> str:
@@ -177,7 +185,13 @@ class Sidebar(QWidget):
             icono("chevron_der" if self._colapsado else "chevron_izq", COLORES.grafito, 14)
         )
         self._marca.setVisible(not self._colapsado)
+        ayuda = "Expandir menú" if self._colapsado else "Contraer menú"
+        self._boton_colapsar.setToolTip(ayuda)
+        self._boton_colapsar.setAccessibleName(ayuda)
         for boton, (_nombre_icono, texto) in zip(self._botones, self._items_planos):
+            boton.setProperty("compact", self._colapsado)
+            boton.style().unpolish(boton)
+            boton.style().polish(boton)
             boton.setText(self._texto_boton(texto))
             boton.setToolTip(texto if self._colapsado else "")
         for etiqueta in self._etiquetas_grupo:

@@ -1,14 +1,21 @@
-"""Lee y amplía `docs/PRACTICAS.md`, la memoria del autocorrector.
+"""La memoria del autocorrector: lo que ya se aprendió reparando.
 
-El archivo se inyecta en el prompt de cada reparación y el autocorrector le
-añade una línea cada vez que un arreglo funciona. Así el sistema deja de
-tropezar dos veces con la misma piedra.
+Son dos archivos que se leen juntos:
 
-Escribir en un archivo que luego alimenta un prompt merece cuidado, y por
-eso todo lo que entra aquí pasa por tres filtros: se recorta a una línea,
-se limita en longitud, y se descarta si ya hay una práctica parecida. Sin
-eso el archivo crece hasta que la parte útil se diluye — y una práctica
-repetida veinte veces no enseña veinte veces más.
+- `docs/PRACTICAS.md` — lo que viene con la versión. Dentro del `.exe` vive
+  en `_internal/`, que el instalador borra y recrea en cada actualización,
+  así que aquí es de **solo lectura**.
+- `practicas_aprendidas.md`, junto al ejecutable — lo que ha aprendido
+  ESTA instalación. Es lo único que se escribe, y por vivir fuera de
+  `_internal/` sobrevive a las actualizaciones.
+
+Tenerlo todo en un archivo obligaba a elegir, al reinstalar, entre perder
+lo aprendido o perder lo que traía la versión nueva. Se comprobó en vivo:
+tras una reinstalación el bloque de aprendidas quedaba vacío.
+
+Todo lo que entra pasa por tres filtros —una sola línea, longitud acotada
+y descarte si ya existe una práctica parecida— porque esto va en el prompt
+de cada reparación y lo repetido diluye lo útil.
 """
 from __future__ import annotations
 
@@ -32,8 +39,8 @@ MAX_PRACTICAS = 40
 MAX_CARACTERES_PROMPT = 12_000
 
 
-def ruta() -> Path:
-    """Localiza el archivo en desarrollo y dentro del .exe empaquetado."""
+def ruta_base() -> Path:
+    """Las prácticas que trae la versión. Solo lectura."""
     directa = BASE_DIR / "docs" / "PRACTICAS.md"
     if directa.exists():
         return directa
@@ -41,15 +48,93 @@ def ruta() -> Path:
     return empaquetada if empaquetada.exists() else directa
 
 
-def leer() -> str:
-    """El texto completo, recortado a lo que cabe en un prompt."""
-    archivo = ruta()
+def ruta() -> Path:
+    """Donde escribe esta instalación. Fuera de `_internal/` a propósito.
+
+    En desarrollo es el mismo `docs/PRACTICAS.md` de siempre: no tiene
+    sentido partir en dos un repositorio que ya se versiona con git.
+    """
+    if not getattr(sys, "frozen", False):
+        return ruta_base()
+    return BASE_DIR / "practicas_aprendidas.md"
+
+
+PLANTILLA_APRENDIDAS = (
+    "# Prácticas aprendidas en este equipo\n\n"
+    "Las escribe el autocorrector cuando una reparación funciona. Se leen\n"
+    "junto a las que trae la versión y sobreviven a las actualizaciones.\n\n"
+    f"{MARCA_INICIO}\n\n{MARCA_FIN}\n"
+)
+
+
+def _leer(archivo: Path) -> str:
     if not archivo.exists():
         return ""
     try:
-        return archivo.read_text(encoding="utf-8")[:MAX_CARACTERES_PROMPT]
+        return archivo.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def ruta_por_migrar() -> Path:
+    """El archivo que deja el instalador con la memoria del formato viejo.
+
+    Es un nombre aparte a propósito. Restaurarlo sobre el `PRACTICAS.md`
+    del paquete perdía las prácticas nuevas que trajera la versión —pasó—,
+    así que el del paquete no se toca nunca.
+    """
+    return BASE_DIR / "practicas_por_migrar.md"
+
+
+def migrar_si_hace_falta() -> int:
+    """Muda lo aprendido en el formato viejo al archivo propio.
+
+    Se hace sola la primera vez y luego borra el archivo de origen.
+    Devuelve cuántas se mudaron; 0 si no había nada o ya se hizo.
+    """
+    propias = ruta()
+    origen = ruta_por_migrar()
+    if propias == ruta_base() or propias.exists() or not origen.exists():
+        return 0
+
+    heredadas = _aprendidas(_leer(origen))
+    if not heredadas:
+        origen.unlink(missing_ok=True)
+        return 0
+    try:
+        propias.parent.mkdir(parents=True, exist_ok=True)
+        propias.write_text(
+            PLANTILLA_APRENDIDAS.replace(
+                f"{MARCA_INICIO}\n\n{MARCA_FIN}",
+                f"{MARCA_INICIO}\n\n" + "\n".join(heredadas) + f"\n\n{MARCA_FIN}",
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        return 0
+    origen.unlink(missing_ok=True)   # mudanza hecha: no se repite
+    return len(heredadas)
+
+
+def leer() -> str:
+    """Las dos memorias juntas, limpias y recortadas para un prompt."""
+    migrar_si_hace_falta()
+    partes = [_leer(ruta_base())]
+    propias = ruta()
+    if propias != ruta_base():
+        aprendidas = _aprendidas(_leer(propias))
+        if aprendidas:
+            partes.append(
+                "\n## Aprendidas en este equipo\n\n" + "\n".join(aprendidas) + "\n"
+            )
+    texto = "\n".join(p for p in partes if p.strip())
+    try:
+        from core.gemini_client import limpiar_nota
+
+        texto = limpiar_nota(texto)
+    except Exception:  # noqa: BLE001 - sin limpiar se manda igual, solo con ruido
+        pass
+    return texto[:MAX_CARACTERES_PROMPT]
 
 
 def _normalizar(texto: str) -> str:
@@ -100,16 +185,24 @@ def anotar(practica: str, automatizacion: str, error: str = "") -> bool:
     if len(practica) < 15 or len(practica) > MAX_LARGO_PRACTICA:
         return False
 
+    migrar_si_hace_falta()
     archivo = ruta()
     if not archivo.exists():
-        return False
-    try:
-        texto = archivo.read_text(encoding="utf-8")
-    except OSError:
+        # La primera práctica de una instalación nueva crea el archivo.
+        try:
+            archivo.parent.mkdir(parents=True, exist_ok=True)
+            archivo.write_text(PLANTILLA_APRENDIDAS, encoding="utf-8")
+        except OSError:
+            return False
+    texto = _leer(archivo)
+    if not texto:
         return False
 
     existentes = _aprendidas(texto)
-    if any(_parecidas(practica, e) for e in existentes):
+    # Se compara tambien contra las que trae la version: si la regla ya
+    # esta escrita ahi, repetirla aqui solo ocupa sitio en el prompt.
+    ya_conocidas = existentes + _aprendidas(_leer(ruta_base()))
+    if any(_parecidas(practica, e) for e in ya_conocidas):
         return False
 
     causa = f" (tras: {error.strip()[:90]})" if error.strip() else ""

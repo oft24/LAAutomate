@@ -11,6 +11,7 @@ CUALQUIER ventana de escritorio abierta y esa ventana queda fijada para
 el resto de la grabacion (ver GrabadoraEscritorio para el porque de este
 diseno). Genera codigo para self.escritorio."""
 from __future__ import annotations
+from urllib.parse import urlsplit
 
 import os
 
@@ -358,6 +359,11 @@ class RecorderView(QWidget):
 
         fila_modo = QHBoxLayout()
         fila_modo.setSpacing(ESPACIADO.xs)
+        selector_modo = QFrame()
+        selector_modo.setObjectName("selectorModo")
+        opciones_modo = QHBoxLayout(selector_modo)
+        opciones_modo.setContentsMargins(4, 4, 4, 4)
+        opciones_modo.setSpacing(4)
         self.boton_modo_web = QPushButton("Web")
         self.boton_modo_escritorio = QPushButton("Escritorio")
         self._grupo_modo = QButtonGroup(self)
@@ -366,10 +372,12 @@ class RecorderView(QWidget):
             boton.setObjectName("modoToggle")
             boton.setCheckable(True)
             boton.setFixedWidth(110)
+            boton.setFixedHeight(32)
             self._grupo_modo.addButton(boton)
             boton.clicked.connect(lambda _checked=False, m=modo: self._cambiar_modo(m))
-            fila_modo.addWidget(boton)
+            opciones_modo.addWidget(boton)
         self.boton_modo_web.setChecked(True)
+        fila_modo.addWidget(selector_modo)
         fila_modo.addStretch()
         v_controles.addLayout(fila_modo)
 
@@ -381,6 +389,7 @@ class RecorderView(QWidget):
         fila_form.setSpacing(ESPACIADO.sm)
         fila_form.addWidget(QLabel("Nombre:"))
         self.campo_nombre_web = QLineEdit()
+        self.campo_nombre_web.setMinimumWidth(220)
         self.campo_nombre_web.setPlaceholderText("mi_proceso_web")
         fila_form.addWidget(self.campo_nombre_web)
         fila_form.addWidget(QLabel("URL inicial:"))
@@ -423,11 +432,8 @@ class RecorderView(QWidget):
         self.boton_detener.clicked.connect(self._detener)
         fila_botones.addWidget(self.boton_detener)
 
-        # Cancelar es una salida DISTINTA de Detener, no un atajo: detener
-        # siempre escribe automations/<nombre>/ y registra la
-        # automatización. Quien se da cuenta a medio flujo de que estaba
-        # grabando la ventana equivocada no tenía forma de salir sin dejar
-        # basura registrada que luego hay que borrar a mano.
+        # Detener genera un borrador; Guardar lo registra. Cancelar descarta
+        # la captura sin generar ni escribir código.
         self.boton_cancelar = QPushButton("Cancelar")
         self.boton_cancelar.setEnabled(False)
         self.boton_cancelar.setToolTip(
@@ -437,6 +443,7 @@ class RecorderView(QWidget):
         fila_botones.addWidget(self.boton_cancelar)
 
         self.boton_logs = QPushButton("Ver registro")
+        fila_botones.addStretch()
         self.boton_logs.setToolTip(
             "Abre el log de la grabadora (clicks ignorados, teclas descartadas, revinculaciones). "
             "Se puede dejar abierto mientras grabas."
@@ -444,10 +451,12 @@ class RecorderView(QWidget):
         self.boton_logs.clicked.connect(self._ver_logs)
         fila_botones.addWidget(self.boton_logs)
 
-        self.estado = QLabel("")
-        fila_botones.addWidget(self.estado)
-        fila_botones.addStretch()
+        self.estado = QLabel("Lista para grabar · configura el nombre y el destino.")
+        self.estado.setWordWrap(True)
         v_controles.addLayout(fila_botones)
+        v_controles.addWidget(self.estado)
+        self._pendiente_guardar = None
+        self._pasos_pendientes = []
 
         layout.addWidget(tarjeta_controles)
 
@@ -481,14 +490,25 @@ class RecorderView(QWidget):
 
         columna_codigo = QVBoxLayout()
         columna_codigo.setSpacing(ESPACIADO.sm)
-        columna_codigo.addWidget(self._subtitulo("Código generado"))
-        self.vista_codigo = QPlainTextEdit(readOnly=True)
+        cabecera_codigo = QHBoxLayout()
+        cabecera_codigo.addWidget(self._subtitulo("Código generado"))
+        cabecera_codigo.addStretch()
+        columna_codigo.addLayout(cabecera_codigo)
+        self.vista_codigo = QPlainTextEdit()
+        self.vista_codigo.setReadOnly(True)
         self.vista_codigo.setObjectName("editorCodigo")
         self._resaltador_codigo = PythonHighlighter(self.vista_codigo.document())
         self.vista_codigo.setPlaceholderText(
             "Aquí vas a ver el código generado en cuanto detengas la grabación."
         )
         columna_codigo.addWidget(self.vista_codigo, stretch=1)
+        self.boton_guardar = QPushButton("Guardar automatización")
+        self.boton_guardar.setFixedWidth(204)
+        self.boton_guardar.setToolTip("Disponible después de detener y generar el código. Revisa el borrador antes de guardarlo.")
+        self.boton_guardar.setObjectName("primario")
+        self.boton_guardar.setEnabled(False)
+        self.boton_guardar.clicked.connect(self._guardar_resultado)
+        cabecera_codigo.addWidget(self.boton_guardar)
         fila_resultado.addLayout(columna_codigo, stretch=1)
 
         layout.addLayout(fila_resultado, stretch=1)
@@ -531,6 +551,8 @@ class RecorderView(QWidget):
     def _alternar_toggle_modo(self, habilitado: bool) -> None:
         self.boton_modo_web.setEnabled(habilitado)
         self.boton_modo_escritorio.setEnabled(habilitado)
+        for campo in (self.campo_nombre_web, self.campo_nombre_escritorio, self.campo_url):
+            campo.setEnabled(habilitado)
 
     def _iniciar(self) -> None:
         if self._modo == "web":
@@ -550,8 +572,21 @@ class RecorderView(QWidget):
         except ValueError as exc:
             self._marcar_error(str(exc))
             return
-        if not url.startswith(("http://", "https://")):
+        if "://" in url and not url.lower().startswith(("http://", "https://")):
+            self._marcar_error("Solo se permiten URLs http:// o https://.")
+            return
+        if not url.lower().startswith(("http://", "https://")):
             url = "https://" + url
+        try:
+            partes = urlsplit(url)
+            if partes.scheme not in ("http", "https") or not partes.hostname or any(c.isspace() for c in url) or partes.username or partes.password:
+                raise ValueError("Usa una URL http/https válida, sin usuario ni contraseña.")
+            _ = partes.port
+        except ValueError as exc:
+            self._marcar_error(str(exc))
+            return
+        if not self._preparar_nueva_grabacion(nombre):
+            return
 
         self.boton_iniciar.setEnabled(False)
         self._alternar_toggle_modo(False)
@@ -561,7 +596,7 @@ class RecorderView(QWidget):
         self._worker = _AbrirNavegadorWorker(url)
         self._worker.listo.connect(self._al_iniciar_listo)
         self._worker.error.connect(self._al_iniciar_error)
-        self._worker.start()
+        self._arrancar_worker(self._worker)
 
     def _al_iniciar_listo(self, grabadora: GrabadoraWeb) -> None:
         self._grabadora = grabadora
@@ -584,6 +619,9 @@ class RecorderView(QWidget):
             self._marcar_error(str(exc))
             return
 
+        if not self._preparar_nueva_grabacion(nombre):
+            return
+
         self.boton_iniciar.setEnabled(False)
         self._alternar_toggle_modo(False)
         self.check_cualquier_ventana.setEnabled(False)
@@ -594,7 +632,7 @@ class RecorderView(QWidget):
         self._worker = _IniciarGrabacionEscritorioWorker(modo_ventana=modo_ventana)
         self._worker.listo.connect(self._al_iniciar_escritorio_listo)
         self._worker.error.connect(self._al_iniciar_error)
-        self._worker.start()
+        self._arrancar_worker(self._worker)
 
     def _al_iniciar_escritorio_listo(self, grabadora: GrabadoraEscritorio) -> None:
         self._grabadora = grabadora
@@ -661,7 +699,7 @@ class RecorderView(QWidget):
         self._worker_cancelar = _CancelarGrabacionWorker(self._grabadora)
         self._worker_cancelar.listo.connect(self._al_cancelar_listo)
         self._worker_cancelar.error.connect(self._al_cancelar_error)
-        self._worker_cancelar.start()
+        self._arrancar_worker(self._worker_cancelar)
 
     def _al_cancelar_listo(self, descartados: int) -> None:
         self._restablecer_controles()
@@ -717,13 +755,22 @@ class RecorderView(QWidget):
             self._worker_detener = _DetenerGrabacionEscritorioWorker(self._grabadora)
         self._worker_detener.listo.connect(self._al_detener_listo)
         self._worker_detener.error.connect(self._al_detener_error)
-        self._worker_detener.start()
+        self._arrancar_worker(self._worker_detener)
+
+    def _arrancar_worker(self, worker) -> None:
+        if isinstance(worker, QThread):
+            worker.setParent(self)
+            worker.finished.connect(worker.deleteLater)
+        worker.start()
 
     def _al_detener_listo(self, pasos: list) -> None:
         self._restablecer_controles()
 
         campo_nombre = self.campo_nombre_web if self._modo == "web" else self.campo_nombre_escritorio
         nombre = campo_nombre.text().strip()
+        if not pasos:
+            self._marcar_error("No se capturaron acciones. Inicia otra grabación y realiza el flujo antes de detener.")
+            return
         try:
             codigo = generar_codigo(nombre, pasos) if self._modo == "web" else generar_codigo_escritorio(nombre, pasos)
         except ValueError as exc:
@@ -731,8 +778,53 @@ class RecorderView(QWidget):
             return
 
         self.vista_codigo.setPlainText(codigo)
+        self.vista_codigo.setReadOnly(False)
+        self._pendiente_guardar = nombre
+        self._pasos_pendientes = pasos
+        self.boton_guardar.setEnabled(True)
+        self.estado.setText(f"Código generado · {len(pasos)} paso(s). Revísalo y pulsa Guardar automatización.")
+        self.estado.setStyleSheet(f"color: {COLORES.musgo}; font-weight: 600;")
+
+    def _preparar_nueva_grabacion(self, nombre: str) -> bool:
+        from core.config import BASE_DIR
+        if (BASE_DIR / "automations" / nombre).exists():
+            self._marcar_error("Ese nombre ya existe. Elige otro para conservar la automatización anterior.")
+            return False
+        if self._pendiente_guardar:
+            from PySide6.QtWidgets import QMessageBox
+            if QMessageBox.question(self, "Código pendiente", "¿Descartar el código pendiente y comenzar otra grabación?",
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+                return False
+        self._pendiente_guardar = None
+        self._pasos_pendientes = []
+        self.boton_guardar.setEnabled(False)
+        self.vista_codigo.clear()
+        self.vista_codigo.setReadOnly(True)
+        return True
+
+    def _guardar_resultado(self) -> None:
+        from core.config import BASE_DIR
+        if not self._pendiente_guardar:
+            return
+        nombre = self._pendiente_guardar
+        codigo = self.vista_codigo.toPlainText()
+        pasos = self._pasos_pendientes
+        if (BASE_DIR / "automations" / nombre).exists():
+            self._marcar_error("El nombre ya existe en disco. No se sobrescribió. Copia el código para conservarlo.")
+            return
 
         try:
+            from engine.scheduler import Scheduler
+            import ast
+            arbol = ast.parse(codigo)
+            compile(arbol, "automation.py", "exec")
+            nombres = [kw.value.value for nodo in ast.walk(arbol) if isinstance(nodo, ast.Call)
+                       and getattr(nodo.func, "id", "") == "registrar" for kw in nodo.keywords
+                       if kw.arg == "nombre" and isinstance(kw.value, ast.Constant)]
+            if nombres != [nombre]:
+                raise ValueError(f'Conserva @registrar(nombre="{nombre}").')
+            Scheduler.validar_disparador_codigo(codigo)
             self._guardar_automatizacion(nombre, codigo)
         except Exception as exc:  # noqa: BLE001 - cualquier fallo al registrar se muestra, no se silencia
             self._marcar_error(
@@ -740,6 +832,10 @@ class RecorderView(QWidget):
                 f"{type(exc).__name__}: {exc}"
             )
             return
+
+        self._pendiente_guardar = None
+        self.boton_guardar.setEnabled(False)
+        self.vista_codigo.setReadOnly(True)
 
         self.estado.setText(f"“{nombre}” creada con {len(pasos)} paso(s) capturados — revísala en Automatizaciones")
         self.estado.setStyleSheet(f"color: {COLORES.musgo}; font-weight: 600;")

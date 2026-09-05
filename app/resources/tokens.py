@@ -100,7 +100,20 @@ def construir_qss() -> str:
     font-family: {t.familia_ui};
     font-size: {t.t_body}px;
     color: {c.tinta};
-    outline: none;
+}}
+
+/* El foco se VE. Habia un `outline: none` en el selector `*` que lo
+   apagaba en toda la app: quien navega con Tab no tenia forma de saber
+   donde estaba parado. Se sigue apagando en las vistas de lista, donde Qt
+   dibuja un recuadro punteado que compite con el color de seleccion, pero
+   nunca de forma global. */
+QPushButton:focus, QToolButton:focus, QComboBox:focus, QCheckBox:focus {{
+    border: 1px solid {c.acento};
+}}
+QPushButton#navItem:focus {{
+    border: 1px solid {c.acento};
+    border-left: 3px solid {c.acento};
+    color: {c.tinta};
 }}
 
 QMainWindow, QWidget#fondoApp {{
@@ -136,9 +149,12 @@ QLabel#sidebarGrupo {{
 }}
 QPushButton#navItem {{
     text-align: left;
-    padding: {e.sm}px {e.md}px;
+    padding: 0 {e.md}px 0 {e.md - 3}px;
+    min-height: 42px;
+    max-height: 42px;
     border-radius: {r.control}px;
-    border: none;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
     background: transparent;
     color: {c.grafito};
     font-weight: {t.peso_medium};
@@ -148,12 +164,35 @@ QPushButton#navItem:hover {{
     background-color: {c.tarjeta_elevada};
     color: {c.tinta};
 }}
+/* Acuse de pulsacion. En web seria `transform: scale(0.97)`; sin
+   transform en QSS, el equivalente es hundir el fondo. */
+QPushButton#navItem:pressed {{
+    background-color: {c.borde};
+    color: {c.tinta};
+}}
 QPushButton#navItem:checked {{
     background-color: {c.acento_suave};
     color: {c.acento};
     font-weight: {t.peso_semibold};
     border-left: 3px solid {c.acento};
     padding-left: {e.md - 3}px;
+}}
+QPushButton#navItem[compact="true"] {{
+    text-align: center;
+    padding: 0;
+}}
+QToolButton#sidebarToggle {{
+    background-color: transparent;
+    border: 1px solid {c.borde};
+    border-radius: 7px;
+    padding: 0;
+}}
+QToolButton#sidebarToggle:hover {{
+    background-color: {c.tarjeta_elevada};
+    border-color: {c.borde_fuerte};
+}}
+QToolButton#sidebarToggle:focus {{
+    border-color: {c.acento};
 }}
 
 /* ---------- Encabezado de pagina ---------- */
@@ -231,7 +270,7 @@ QPushButton {{
     border: 1px solid {c.borde};
     border-radius: {r.control}px;
     padding: 0 {e.md}px;
-    min-height: {d.alto_control}px;
+    min-height: {d.alto_control - 2}px;
     font-weight: {t.peso_medium};
     color: {c.tinta};
 }}
@@ -243,8 +282,9 @@ QPushButton:pressed {{
     background-color: {c.reticula};
 }}
 QPushButton:disabled {{
-    color: {c.grafito_claro};
-    background-color: {c.reticula};
+    color: {c.grafito};
+    background-color: {c.tarjeta};
+    border-color: {c.borde};
 }}
 QPushButton#primario {{
     background-color: {c.acento};
@@ -252,37 +292,52 @@ QPushButton#primario {{
     color: {c.tarjeta};
     font-weight: {t.peso_semibold};
 }}
+QPushButton#primario:pressed {{
+    background-color: {c.acento_hover};
+    border-color: {c.acento_hover};
+}}
 QPushButton#primario:hover {{
     background-color: {c.acento_hover};
     border-color: {c.acento_hover};
 }}
 QPushButton#primario:disabled {{
-    background-color: {c.grafito_claro};
-    border-color: {c.grafito_claro};
+    background-color: {c.tarjeta_elevada};
+    border-color: {c.borde};
+    color: {c.grafito};
 }}
 QPushButton#peligro {{
     background-color: {c.tarjeta};
     border-color: {c.oxido};
     color: {c.oxido};
 }}
+QPushButton#peligro:pressed {{
+    background-color: {c.oxido};
+    color: {c.tarjeta};
+}}
 QPushButton#peligro:hover {{
     background-color: {c.oxido_suave};
 }}
 QPushButton#modoToggle {{
-    background-color: {c.reticula};
-    border-color: {c.borde};
+    background-color: transparent;
+    border-color: transparent;
     color: {c.grafito};
     font-weight: {t.peso_medium};
-    min-height: {d.alto_control - 4}px;
+    min-height: 30px;
+    max-height: 30px;
 }}
 QPushButton#modoToggle:checked {{
-    background-color: {c.acento};
-    border-color: {c.acento};
-    color: {c.tarjeta};
+    background-color: {c.acento_suave};
+    border-color: {c.borde_fuerte};
+    color: {c.acento};
     font-weight: {t.peso_semibold};
 }}
 QPushButton#modoToggle:disabled {{
-    color: {c.grafito_claro};
+    color: {c.grafito};
+}}
+QFrame#selectorModo {{
+    background-color: {c.papel};
+    border: 1px solid {c.borde};
+    border-radius: 10px;
 }}
 
 /* ---------- Inputs ---------- */
@@ -298,7 +353,7 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QTextBrowser:focus, QCom
     border: 1px solid {c.acento};
 }}
 QLineEdit {{
-    min-height: {d.alto_control}px;
+    min-height: {d.alto_control - 2 * e.xs - 2}px;
 }}
 QPlainTextEdit#editorCodigo, QPlainTextEdit#consola {{
     font-family: {t.familia_mono};
@@ -321,7 +376,7 @@ QLineEdit::placeholder, QPlainTextEdit::placeholder {{
    Sin esas dos reglas Qt dibuja su triangulo, que se lee bien sobre el
    fondo oscuro. */
 QComboBox {{
-    min-height: {d.alto_control}px;
+    min-height: {d.alto_control - 2}px;
     /* hueco a la derecha para que el texto no se meta debajo de la flecha */
     padding: 0 26px 0 {e.sm}px;
 }}
@@ -329,6 +384,7 @@ QComboBox:hover {{
     border-color: {c.borde_fuerte};
 }}
 QComboBox QAbstractItemView {{
+    outline: none;
     background-color: {c.tarjeta_elevada};
     border: 1px solid {c.borde_fuerte};
     border-radius: {r.control}px;
@@ -347,6 +403,7 @@ QComboBox QAbstractItemView::item {{
 
 /* ---------- Tabla ---------- */
 QTableWidget {{
+    outline: none;
     background-color: {c.tarjeta};
     border: 1px solid {c.borde};
     border-radius: {r.tarjeta}px;
@@ -374,6 +431,7 @@ QHeaderView::section {{
 
 /* ---------- Lista (Automatizaciones, Programador) ---------- */
 QListWidget {{
+    outline: none;
     background-color: {c.tarjeta};
     border: 1px solid {c.borde};
     border-radius: {r.tarjeta}px;
@@ -423,6 +481,9 @@ QToolButton {{
 }}
 QToolButton:hover {{
     background-color: {c.reticula};
+}}
+QToolButton:pressed {{
+    background-color: {c.borde};
 }}
 QToolButton::menu-indicator {{
     image: none;

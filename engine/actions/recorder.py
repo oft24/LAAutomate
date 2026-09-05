@@ -26,10 +26,8 @@ _SCRIPT_GRABADOR = r"""
     if (window.__rpaGrabando) { return; }
     window.__rpaGrabando = true;
 
-    // localStorage (no una variable de JS) porque sobrevive a la navegacion:
-    // si el usuario da click y la pagina navega antes de que Python alcance
-    // a leer el evento, una variable en memoria se perderia con el contexto
-    // viejo -- localStorage del mismo origen sigue ahi en la pagina nueva.
+    // localStorage y no una variable: sobrevive a la navegacion. Un click
+    // que navega antes de que Python lea el evento perderia la variable.
     function leerEventos() {
         try { return JSON.parse(localStorage.getItem('__rpaEventos') || '[]'); }
         catch (e) { return []; }
@@ -91,9 +89,8 @@ _SCRIPT_GRABADOR = r"""
         });
     }, true);
 
-    // Tipos de <input> donde "el valor" no es texto tecleado sino un
-    // estado (marcado/sin marcar, un archivo elegido, un color). Convertir
-    // eso en self.web.escribir() produce codigo que no reproduce nada.
+    // <input> donde el valor es un estado, no texto tecleado. Convertirlos
+    // en self.web.escribir() produce codigo que no reproduce nada.
     var TIPOS_SIN_TEXTO = {
         checkbox: 1, radio: 1, file: 1, submit: 1, button: 1,
         image: 1, reset: 1, range: 1, color: 1
@@ -107,11 +104,9 @@ _SCRIPT_GRABADOR = r"""
         return tipo !== 'password' && !TIPOS_SIN_TEXTO[tipo];
     }
 
-    // Una escritura SUSTITUYE a la anterior sobre el mismo campo en vez de
-    // encolarse: 'input' emite un evento por tecla y cada uno trae el valor
-    // COMPLETO del campo, asi que guardarlos todos solo haria crecer el
-    // JSON de localStorage (que se lee y reescribe entero en cada tecla)
-    // para terminar quedandose igual con el ultimo.
+    // Una escritura SUSTITUYE a la anterior sobre el mismo campo: 'input'
+    // emite un evento por tecla y cada uno trae el valor completo, asi que
+    // encolarlos solo engorda el JSON para acabar en el ultimo.
     function guardarEscritura(evento) {
         var eventos = leerEventos();
         var ultimo = eventos[eventos.length - 1];
@@ -123,13 +118,9 @@ _SCRIPT_GRABADOR = r"""
         localStorage.setItem('__rpaEventos', JSON.stringify(eventos));
     }
 
-    // 'input' y no 'change': 'change' solo se emite cuando el campo CONFIRMA
-    // su valor, que en un campo de texto significa al perder el foco. Quien
-    // escribia y se iba directo a LaAutomate a presionar "Detener" nunca
-    // sacaba el foco del campo dentro de la pagina, el evento no se emitia
-    // nunca y el paso 'escribir' simplemente no existia -- el vaciado final
-    // no puede recuperar un evento que el navegador jamas emitio. Era la
-    // causa de que la grabadora web pareciera "no capturar lo que escribo".
+    // 'input' y no 'change': 'change' solo se emite al perder el foco, y
+    // quien escribe y se va directo a pulsar "Detener" nunca lo pierde. El
+    // paso 'escribir' no llegaba a existir.
     document.addEventListener('input', function(ev) {
         var el = ev.target;
         if (!esCampoDeTexto(el)) return;

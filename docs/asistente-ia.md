@@ -1,3 +1,8 @@
+---
+tags: [laautomate, ia, asistente]
+alias: ["Asistente IA", "El chat"]
+---
+
 # Asistente IA con Gemini
 
 La vista **Asistente IA** convierte una descripción y hasta varias capturas de
@@ -109,3 +114,12 @@ Después se importa mediante el mismo registry y se muestra en
 El modelo puede equivocarse: una captura no garantiza selectores estables ni revela
 estados que no aparecen en pantalla. Los placeholders `CAMBIAR_*`, rutas,
 credenciales y selectores siempre deben revisarse antes de ejecutar.
+
+---
+
+## Notas relacionadas
+
+- [[prompts]] - como esta construido el prompt del sistema
+- [[PRACTICAS]] - lo aprendido que se le inyecta en cada peticion
+- [[autocorreccion]] - el mismo modelo, pero reparando
+- [[acciones]] - la referencia que recibe como contexto

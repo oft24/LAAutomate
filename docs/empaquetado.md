@@ -1,3 +1,8 @@
+---
+tags: [laautomate, distribucion]
+alias: ["Empaquetado", "Instalador"]
+---
+
 # Empaquetado e instalación
 
 La app se distribuye como una carpeta con `LaAutomate.exe` dentro, generada por
@@ -11,7 +16,7 @@ empaquetar.bat
 
 Hace tres cosas:
 
-1. `PyInstaller LaAutomate.spec --noconfirm` → genera `dist/LaAutomate/`.
+1. `PyInstaller LaAutomate.spec --noconfirm` -> genera `dist/LaAutomate/`.
 2. Copia al lado del `.exe` lo que PyInstaller no incluye: `README.md`, `.env.example`,
    la carpeta `automations/` y los dos `.bat` del instalador.
 3. Te dice qué correr para instalar.
@@ -91,3 +96,10 @@ Si agregas una dependencia que se importe dinámicamente, va a fallar solo en el
 El nombre visible sale de `NOMBRE_APP` en `core/config.py` (título de ventana y marca
 de la barra lateral). El nombre del ejecutable, la carpeta de instalación y el acceso
 directo salen del `.spec` y de los `.bat` del instalador.
+
+---
+
+## Notas relacionadas
+
+- [[desarrollo]] - el entorno desde el que se empaqueta
+- [[vision-general]] - los primeros pasos tras instalar

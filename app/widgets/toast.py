@@ -3,8 +3,8 @@ cierra sola -- para resultados de acciones sin interrumpir al usuario con
 un QMessageBox modal."""
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QLabel, QWidget
 
 from app.resources.tokens import COLORES, ESPACIADO
 
@@ -38,6 +38,21 @@ class Toast(QWidget):
         self.adjustSize()
         self._posicionar(parent)
         self.show()
+
+        # Entra con un fundido corto. Un toast se ve pocas veces, asi que
+        # animarlo esta justificado -- y aparecer de golpe se lee como un
+        # fallo de repintado. Desde 0.0 y no desde 0.6 como las vistas:
+        # aqui SI es un elemento que no existia hace un instante.
+        self._efecto = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._efecto)
+        self._entrada = QPropertyAnimation(self._efecto, b"opacity", self)
+        self._entrada.setDuration(160)
+        self._entrada.setStartValue(0.0)
+        self._entrada.setEndValue(1.0)
+        # ease-out: arranca rapido, que es lo que hace que se sienta
+        # inmediato en vez de perezoso.
+        self._entrada.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._entrada.start()
 
         QTimer.singleShot(duracion_ms, self.close)
 

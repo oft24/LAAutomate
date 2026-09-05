@@ -31,9 +31,19 @@ class _ClienteFalso:
         return _Respuesta(texto)
 
 
+# Los huecos que `autocorreccion` rellena en cada intento. Un prompt de
+# prueba que no los lleve es mas comodo que el de verdad, y entonces deja
+# sin probar justo la parte que importa.
+HUECOS = (
+    "\n\nMAX_REPAIR_ATTEMPTS = {{MAX_REPAIR_ATTEMPTS}}\n"
+    "Intento actual: {{CURRENT_ATTEMPT}}\n\n"
+    "## Intentos anteriores\n\n{{PREVIOUS_ATTEMPTS}}\n"
+)
+
 PROMPT_BASE = (
     "# repair_prompt_v1\n\n"
     + "Eres un agente de reparación. " * 60
+    + HUECOS
     + "\n\n## Reglas de seguridad\nNunca expongas credenciales.\n"
     + "\n## Salida obligatoria\nDevuelve JSON con \"status\".\n"
 )
@@ -43,6 +53,7 @@ def _prompt_valido(version: str = "repair_prompt_v2") -> str:
     return (
         f"# {version}\n\n"
         + "Eres un agente de reparación mejorado. " * 55
+        + HUECOS
         + "\n\n## Reglas de seguridad\nNunca expongas credenciales.\n"
         + "\n## Salida obligatoria\nDevuelve JSON con \"status\".\n"
     )
@@ -183,6 +194,23 @@ def test_no_se_acepta_un_prompt_que_pierde_una_seccion_critica(entorno, seccion)
     assert opt.version_actual() == "repair_prompt_v1"
 
 
+@pytest.mark.parametrize(
+    "hueco", ["{{MAX_REPAIR_ATTEMPTS}}", "{{CURRENT_ATTEMPT}}", "{{PREVIOUS_ATTEMPTS}}"]
+)
+def test_no_se_acepta_un_prompt_que_pierde_un_hueco(entorno, hueco) -> None:
+    """Sin estos huecos el agente deja de saber en qué intento va y qué ya
+    probó. Nada falla de forma visible: repite la misma corrección para
+    siempre, que es la degradación más cara de detectar."""
+    mutilado = _prompt_valido().replace(hueco, "")
+    cliente = _ClienteFalso({"update_prompt": True, "new_prompt": mutilado, "learning": {}})
+
+    resultado = _llamar(cliente)
+
+    assert not resultado.actualizado
+    assert hueco in resultado.motivo
+    assert opt.version_actual() == "repair_prompt_v1"
+
+
 def test_una_respuesta_que_no_es_json_no_rompe_nada(entorno) -> None:
     resultado = _llamar(_ClienteFalso("lo siento, no puedo ayudarte con eso"))
 
@@ -217,7 +245,16 @@ def test_el_optimizador_recibe_todo_el_contexto(entorno) -> None:
     assert "ElementNotFoundError" in peticion
     assert "success=True" in peticion
     assert "repair_prompt_v1" in peticion
-    assert "{{" not in peticion, "todos los marcadores deben venir sustituidos"
+    for marcador in (
+        "{{CURRENT_PROMPT}}", "{{INCIDENT}}", "{{ORIGINAL_ERROR}}",
+        "{{SCREENSHOT_ANALYSIS}}", "{{FAILED_ATTEMPTS}}",
+        "{{SUCCESSFUL_CORRECTION}}", "{{SUCCESS_VALIDATION}}", "{{PROMPT_VERSION}}",
+    ):
+        assert marcador not in peticion, f"{marcador} llegó sin sustituir"
+    # Los huecos del prompt DE REPARACION si tienen que seguir ahi: van
+    # dentro de {{CURRENT_PROMPT}} y el optimizador debe conservarlos en la
+    # version que devuelva.
+    assert "{{PREVIOUS_ATTEMPTS}}" in peticion
 
 
 def test_la_version_se_lee_de_la_primera_linea() -> None:

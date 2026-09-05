@@ -1,15 +1,11 @@
-"""Anota cada acción que ejecuta una automatización, para poder contar
-qué estaba haciendo cuando falló.
+"""Anota cada acción que ejecuta una automatización, en orden.
 
-El traceback dice en qué LÍNEA murió. La bitácora dice qué pasó ANTES: en
-qué ventana estaba, qué había tecleado, cuántos clics llevaba. Esa es la
-diferencia entre "ElementNotFoundError en la línea 34" y "conectó con la
-Calculadora, escribió 12, y el clic siguiente no encontró el botón» —
-la segunda se puede diagnosticar, la primera no.
+El traceback dice en qué línea murió; la bitácora dice qué pasó antes. Es
+la diferencia entre «ElementNotFoundError en la línea 34» y «conectó con
+la Calculadora, escribió 12, y el clic siguiente no encontró el botón».
 
-No sustituye al log: el log lleva todo, la bitácora lleva SOLO las
-acciones, ya resumidas y en el orden en que ocurrieron, que es lo que se
-le manda a un modelo con un presupuesto de contexto limitado.
+No sustituye al log: lleva solo las acciones, ya resumidas, que es lo que
+cabe en el contexto de un modelo.
 """
 from __future__ import annotations
 

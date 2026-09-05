@@ -7,7 +7,8 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, QSize
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.page_header import PageHeader
+from app.widgets.python_highlighter import PythonHighlighter
 from core.config import BASE_DIR, LOGS_DIR, var
 from core.gemini_client import (
     MODELO_POR_DEFECTO,
@@ -44,6 +47,7 @@ from core.gemini_client import (
     modelo_por_defecto,
     ordenar_para_elegir,
     tiene_api_key,
+    validar_capturas,
 )
 from engine.almacen import listar_en_disco
 from engine.diagnostico import contexto_de_fallo, prompt_de_correccion
@@ -109,11 +113,15 @@ def _validar_importacion_segura(arbol: ast.Module) -> None:
         if isinstance(nodo, ast.Expr) and isinstance(nodo.value, ast.Constant) and isinstance(nodo.value.value, str):
             continue  # docstring de módulo
         if isinstance(nodo, (ast.Assign, ast.AnnAssign)):
-            if not _es_literal_seguro(nodo.value):
+            destinos = nodo.targets if isinstance(nodo, ast.Assign) else [nodo.target]
+            if not all(isinstance(destino, ast.Name) for destino in destinos) or not _es_literal_seguro(nodo.value):
                 raise ValueError("El borrador contiene código ejecutable a nivel de módulo.")
             continue
         if not isinstance(nodo, ast.ClassDef):
             raise ValueError("El borrador contiene código ejecutable a nivel de módulo.")
+
+        if nodo.keywords or any(not isinstance(base, ast.Name) for base in nodo.bases):
+            raise ValueError("La herencia o metaclase ejecutaría código al importar el borrador.")
 
         for decorador in nodo.decorator_list:
             if not (
@@ -130,7 +138,8 @@ def _validar_importacion_segura(arbol: ast.Module) -> None:
             if isinstance(miembro, ast.Expr) and isinstance(miembro.value, ast.Constant):
                 continue
             if isinstance(miembro, (ast.Assign, ast.AnnAssign)):
-                if not _es_literal_seguro(miembro.value):
+                destinos = miembro.targets if isinstance(miembro, ast.Assign) else [miembro.target]
+                if not all(isinstance(destino, ast.Name) for destino in destinos) or not _es_literal_seguro(miembro.value):
                     raise ValueError("La clase contiene una asignación que se ejecutaría al importarla.")
                 continue
             if not isinstance(miembro, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -154,7 +163,10 @@ def preparar_codigo(codigo: str, nombre: str) -> str:
         raise ValueError("El bloque no contiene @registrar(nombre=...).")
     codigo = _NOMBRE_EN_DECORADOR.sub(rf"\g<1>\g<2>{nombre}\g<4>", codigo, count=1)
     arbol = ast.parse(codigo)
+    compile(arbol, "automation.py", "exec")
     _validar_importacion_segura(arbol)
+    from engine.scheduler import Scheduler
+    Scheduler.validar_disparador_codigo(codigo)
     clases = [n for n in arbol.body if isinstance(n, ast.ClassDef)]
     if not any(
         any(isinstance(base, ast.Name) and base.id == "BaseAutomation" for base in clase.bases)
@@ -220,7 +232,7 @@ class _Burbuja(QFrame):
         super().__init__()
         es_usuario = rol == "user"
         self.setObjectName("burbujaUsuario" if es_usuario else "burbujaIA")
-        self.setMinimumWidth(380 if es_usuario else 620)
+        self.setMinimumWidth(0)
         self.setMaximumWidth(860)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -257,6 +269,7 @@ class AssistantView(QWidget):
         self._worker_modelos: _ModelosWorker | None = None
         self._rotas: dict[str, str] = {}
         self._puntos = 0
+        self._modelos_cargados = False
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(24, 24, 24, 24)
@@ -320,19 +333,34 @@ class AssistantView(QWidget):
         self.entrada.setMaximumHeight(112)
         v.addWidget(self.entrada)
 
-        fila = QHBoxLayout()
+        self.panel_resultado = QFrame()
+        self.panel_resultado.setObjectName("tarjeta")
+        resultado = QVBoxLayout(self.panel_resultado)
+        resultado.addWidget(self._etiqueta("Resultado · revisa antes de crear"))
+        self.codigo_resultado = QPlainTextEdit(readOnly=True)
+        self.codigo_resultado.setObjectName("editorCodigo")
+        self.codigo_resultado.setMaximumHeight(145)
+        self._resaltador_resultado = PythonHighlighter(self.codigo_resultado.document())
+        resultado.addWidget(self.codigo_resultado)
+        fila_resultado = QHBoxLayout()
         self.boton_copiar = QPushButton("Copiar código")
         self.boton_copiar.setEnabled(False)
         self.boton_copiar.clicked.connect(self._copiar_codigo)
-        fila.addWidget(self.boton_copiar)
+        fila_resultado.addWidget(self.boton_copiar)
         self.boton_crear = QPushButton("Crear automatización")
         self.boton_crear.setEnabled(False)
         self.boton_crear.clicked.connect(self._crear_automatizacion)
-        fila.addWidget(self.boton_crear)
-        fila.addStretch()
+        fila_resultado.addWidget(self.boton_crear)
+        fila_resultado.addStretch()
+        resultado.addLayout(fila_resultado)
+        self.panel_resultado.hide()
+        layout.addWidget(self.panel_resultado)
+        fila = QHBoxLayout()
         self.estado = QLabel("")
         self.estado.setObjectName("estadoIA")
-        fila.addWidget(self.estado)
+        self.estado.setWordWrap(True)
+        v.addWidget(self.estado)
+        fila.addStretch()
         self.boton_enviar = QPushButton("Generar con Gemini")
         self.boton_enviar.setObjectName("primario")
         self.boton_enviar.clicked.connect(self._enviar)
@@ -344,8 +372,7 @@ class AssistantView(QWidget):
     def _construir_contexto(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panelContexto")
-        panel.setMinimumWidth(290)
-        panel.setMaximumWidth(340)
+        panel.setMinimumWidth(250)
         v = QVBoxLayout(panel)
         v.setContentsMargins(ESPACIADO.lg, ESPACIADO.lg, ESPACIADO.lg, ESPACIADO.lg)
         v.setSpacing(ESPACIADO.sm)
@@ -359,9 +386,12 @@ class AssistantView(QWidget):
         v.addWidget(self.estado_clave)
         fila_clave = QHBoxLayout()
         boton_clave = QPushButton("Configurar clave")
+        self.boton_clave = boton_clave
         boton_clave.clicked.connect(self._configurar_clave)
         fila_clave.addWidget(boton_clave)
         boton_olvidar = QPushButton("Olvidar")
+        self.boton_olvidar = boton_olvidar
+        boton_olvidar.setObjectName("peligro")
         boton_olvidar.clicked.connect(self._olvidar_clave)
         fila_clave.addWidget(boton_olvidar)
         v.addLayout(fila_clave)
@@ -384,6 +414,9 @@ class AssistantView(QWidget):
         self.combo_modelo.activated.connect(self._marcar_modelo_manual)
         self.combo_modelo.lineEdit().textEdited.connect(self._marcar_modelo_manual)
         v.addWidget(self.combo_modelo)
+        self.boton_modelos = QPushButton("Actualizar modelos")
+        self.boton_modelos.clicked.connect(lambda: self._cargar_modelos_disponibles(forzar=True))
+        v.addWidget(self.boton_modelos)
 
         v.addWidget(self._etiqueta("Código de referencia"))
         self.combo_automatizacion = QComboBox()
@@ -391,7 +424,7 @@ class AssistantView(QWidget):
 
         nota = QLabel(
             "Siempre se incluyen arquitectura, acciones y lógica de la grabadora. "
-            "Nunca se envían .env, logs ni credenciales."
+            "El log solo se agrega al preparar un diagnóstico; revisa el mensaje y las capturas antes de enviarlos. No se lee .env ni la Bóveda como contexto."
         )
         nota.setObjectName("tarjetaDescripcion")
         nota.setWordWrap(True)
@@ -400,21 +433,41 @@ class AssistantView(QWidget):
         v.addSpacing(ESPACIADO.sm)
         v.addWidget(self._etiqueta("Capturas de este turno"))
         self.lista_capturas = QListWidget()
+        self.lista_capturas.setIconSize(QSize(64, 44))
         self.lista_capturas.setMaximumHeight(135)
         v.addWidget(self.lista_capturas)
+        self.resumen_capturas = QLabel("Sin capturas. Puedes describir el flujo solo con texto.")
+        self.resumen_capturas.setWordWrap(True)
+        v.addWidget(self.resumen_capturas)
         boton_adjuntar = QPushButton("Adjuntar capturas")
+        self.boton_adjuntar = boton_adjuntar
         boton_adjuntar.clicked.connect(self._adjuntar_capturas)
         v.addWidget(boton_adjuntar)
         boton_limpiar = QPushButton("Limpiar capturas")
+        self.boton_limpiar = boton_limpiar
+        boton_limpiar.setEnabled(False)
         boton_limpiar.clicked.connect(self._limpiar_capturas)
         v.addWidget(boton_limpiar)
+        self.boton_quitar = QPushButton("Quitar seleccionada")
+        self.boton_quitar.setEnabled(False)
+        self.boton_quitar.clicked.connect(self._quitar_captura)
+        self.lista_capturas.currentRowChanged.connect(
+            lambda fila: self.boton_quitar.setEnabled(fila >= 0 and self._worker is None)
+        )
+        v.addWidget(self.boton_quitar)
         v.addStretch()
 
         privacidad = QLabel("Las imágenes solo salen del equipo al presionar “Generar con Gemini”.")
         privacidad.setObjectName("chipArchivo")
         privacidad.setWordWrap(True)
         v.addWidget(privacidad)
-        return panel
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setMinimumWidth(270)
+        area.setMaximumWidth(320)
+        area.setWidget(panel)
+        return area
 
     @staticmethod
     def _etiqueta(texto: str) -> QLabel:
@@ -443,12 +496,12 @@ class AssistantView(QWidget):
     def _agregar_burbuja(self, rol: str, texto: str) -> None:
         burbuja = _Burbuja(rol, texto)
         alineacion = Qt.AlignmentFlag.AlignRight if rol == "user" else Qt.AlignmentFlag.AlignLeft
-        self._layout_mensajes.insertWidget(self._layout_mensajes.count() - 1, burbuja, alignment=alineacion)
+        self._layout_mensajes.insertWidget(self._layout_mensajes.count() - 1, burbuja)
         QTimer.singleShot(0, lambda: self._area.verticalScrollBar().setValue(self._area.verticalScrollBar().maximum()))
 
     def _agregar_sugerencias(self) -> None:
         fila = QWidget()
-        layout = QHBoxLayout(fila)
+        layout = QVBoxLayout(fila)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ESPACIADO.sm)
         sugerencias = (
@@ -468,11 +521,20 @@ class AssistantView(QWidget):
                 boton.clicked.connect(self._preparar_correccion)
             else:
                 boton.clicked.connect(
-                    lambda _checked=False, texto=prompt: self.entrada.setPlainText(texto)
+                    lambda _checked=False, texto=prompt: self._usar_sugerencia(texto)
                 )
             layout.addWidget(boton)
         layout.addStretch()
         self._layout_mensajes.insertWidget(self._layout_mensajes.count() - 1, fila)
+        self._sugerencias = fila
+
+    def _usar_sugerencia(self, texto: str) -> None:
+        if self.entrada.toPlainText().strip():
+            self.entrada.setFocus()
+            self.estado.setText("Conservé tu mensaje actual. Puedes editarlo antes de generar.")
+            return
+        self.entrada.setPlainText(texto)
+        self.entrada.setFocus()
 
     def mostrar_reparacion(self, reparacion) -> None:
         """Cuenta en el chat una sesion de autocorreccion ya terminada.
@@ -519,17 +581,31 @@ class AssistantView(QWidget):
                     existentes.add(str(captura).lower())
 
         self.refrescar_contexto()
+        self._refrescar_capturas()
         self.estado.setText(
             f"Autocorrección de «{reparacion.automatizacion}»: "
             + ("reparada" if reparacion.reparada else "sin resolver")
         )
 
     def _preparar_correccion(self) -> None:
-        """Rellena la entrada con el fallo REAL de la automatización elegida."""
+        """El chip «Explicar un error»: usa la automatización ya elegida."""
         nombre = self.combo_automatizacion.currentData()
         if not nombre:
             self.estado.setText("Elige primero una automatización en “Código de referencia”.")
             return
+        self.preparar_correccion(nombre)
+
+    def preparar_correccion(self, nombre: str) -> bool:
+        """Deja el chat listo para corregir `nombre`. True si hay rastro.
+
+        La llama el botón «Corregir código» de Automatizaciones. Selecciona
+        la automatización en el combo para que el código también viaje como
+        contexto: sin eso el modelo diagnostica un log a ciegas.
+        """
+        for i in range(self.combo_automatizacion.count()):
+            if self.combo_automatizacion.itemData(i) == nombre:
+                self.combo_automatizacion.setCurrentIndex(i)
+                break
 
         log, captura = contexto_de_fallo(nombre, LOGS_DIR)
         causa = getattr(self, "_rotas", {}).get(nombre, "")
@@ -538,18 +614,33 @@ class AssistantView(QWidget):
         if captura is not None and str(captura).lower() not in {str(r).lower() for r in self._capturas}:
             self._capturas.append(captura)
             self.lista_capturas.addItem(captura.name)
+        self._refrescar_capturas()
 
         if not log.strip() and not causa:
             self.estado.setText(f"Sin log de “{nombre}”: ejecútala para que falle y vuelve a pulsar.")
-        elif captura is None:
-            self.estado.setText(f"Cargado el log de “{nombre}” (no hay captura del error).")
+            return False
+        if captura is None:
+            self.estado.setText(
+                f"Cargado el log de “{nombre}” (no hay captura del error). "
+                "Revisa el mensaje y pulsa Enviar."
+            )
         else:
-            self.estado.setText(f"Cargado el log de “{nombre}” y su captura del error.")
+            self.estado.setText(
+                f"Cargado el log de “{nombre}” y su captura del error. "
+                "Revisa el mensaje y pulsa Enviar."
+            )
+        return True
 
-    def _cargar_modelos_disponibles(self) -> None:
+    def _cargar_modelos_disponibles(self, forzar: bool = False) -> None:
         """Reemplaza la lista de reserva por los modelos reales de la cuenta."""
         if not tiene_api_key() or self._worker_modelos is not None:
             return
+        if self._worker is not None or (self._modelos_cargados and not forzar):
+            return
+        self.boton_modelos.setEnabled(False)
+        self.boton_clave.setEnabled(False)
+        self.boton_olvidar.setEnabled(False)
+        self.boton_modelos.setText("Consultando modelos…")
         self._worker_modelos = _ModelosWorker()
         self._worker_modelos.listo.connect(self._al_llegar_modelos)
         self._worker_modelos.error.connect(self._al_fallar_modelos)
@@ -557,6 +648,7 @@ class AssistantView(QWidget):
         self._worker_modelos.start()
 
     def _al_llegar_modelos(self, resultado) -> None:
+        self._modelos_cargados = True
         modelos, preferido = resultado
         elegido = self.combo_modelo.currentText().strip()
 
@@ -597,7 +689,13 @@ class AssistantView(QWidget):
         self.estado.setText(f"No pude leer los modelos de tu cuenta: {mensaje}")
 
     def _liberar_worker_modelos(self) -> None:
+        if self._worker_modelos is not None:
+            self._worker_modelos.deleteLater()
         self._worker_modelos = None
+        self.boton_modelos.setText("Actualizar modelos")
+        self.boton_modelos.setEnabled(self._worker is None)
+        self.boton_clave.setEnabled(self._worker is None)
+        self._actualizar_estado_clave()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -611,6 +709,7 @@ class AssistantView(QWidget):
         else:
             self.estado_clave.setText("● Falta configurar la API key")
             self.estado_clave.setStyleSheet(f"color: {COLORES.ocre}; font-weight: 600;")
+        self.boton_olvidar.setEnabled(tiene_api_key() and self._worker is None and self._worker_modelos is None)
 
     def _configurar_clave(self) -> None:
         clave, aceptado = QInputDialog.getText(
@@ -627,14 +726,25 @@ class AssistantView(QWidget):
             QMessageBox.critical(self, "No se pudo guardar", str(exc))
             return
         self._actualizar_estado_clave()
+        self._modelos_cargados = False
+        self._cargar_modelos_disponibles()
 
     def _olvidar_clave(self) -> None:
+        if QMessageBox.question(self, "Olvidar clave", "¿Eliminar la clave de Gemini guardada en Windows?",
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
         try:
             eliminar_api_key()
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "No se pudo eliminar", str(exc))
             return
         self._actualizar_estado_clave()
+        self._modelos_cargados = False
+        self.estado.setText("Clave de Windows eliminada." + (
+            " Sigue configurada una clave en GEMINI_API_KEY; elimínala del entorno para desconectar."
+            if tiene_api_key() else " Configura una clave para volver a generar."
+        ))
 
     def _adjuntar_capturas(self) -> None:
         rutas, _ = QFileDialog.getOpenFileNames(
@@ -647,15 +757,46 @@ class AssistantView(QWidget):
         for texto in rutas:
             ruta = Path(texto)
             if str(ruta).lower() not in existentes:
+                try:
+                    validar_capturas([*self._capturas, ruta])
+                except Exception as exc:
+                    self.estado.setText(str(exc))
+                    continue
                 self._capturas.append(ruta)
                 self.lista_capturas.addItem(ruta.name)
                 existentes.add(str(ruta).lower())
+        self._refrescar_capturas()
+
+    def _refrescar_capturas(self) -> None:
+        self.lista_capturas.clear()
+        for ruta in self._capturas:
+            item = QListWidgetItem(ruta.name)
+            pixmap = QPixmap(str(ruta))
+            if not pixmap.isNull():
+                item.setIcon(QIcon(pixmap.scaled(64, 44, Qt.AspectRatioMode.KeepAspectRatio,
+                                              Qt.TransformationMode.SmoothTransformation)))
+            item.setToolTip(str(ruta))
+            self.lista_capturas.addItem(item)
+        cantidad = len(self._capturas)
+        self.resumen_capturas.setText(f"{cantidad} captura(s) para el siguiente envío · máximo 12 MB"
+                                     if cantidad else "Sin capturas. Puedes describir el flujo solo con texto.")
+        self.boton_limpiar.setEnabled(bool(cantidad) and self._worker is None)
+
+    def _quitar_captura(self) -> None:
+        indice = self.lista_capturas.currentRow()
+        if self._worker is None and 0 <= indice < len(self._capturas):
+            self._capturas.pop(indice)
+            self._refrescar_capturas()
 
     def _limpiar_capturas(self) -> None:
         self._capturas.clear()
         self.lista_capturas.clear()
+        self._refrescar_capturas()
 
     def _enviar(self) -> None:
+        if self._worker_modelos is not None:
+            self.estado.setText("Espera a que termine la consulta de modelos antes de generar.")
+            return
         if self._worker is not None:
             return
         mensaje = self.entrada.toPlainText().strip()
@@ -670,18 +811,33 @@ class AssistantView(QWidget):
             )
             return
 
+        try:
+            validar_capturas(self._capturas)
+            contexto = construir_contexto_proyecto(self.combo_automatizacion.currentData())
+            modelo = self.combo_modelo.currentText().strip()
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", modelo):
+                raise ValueError("Selecciona un modelo válido.")
+        except Exception as exc:
+            self.estado.setText(f"No se pudo preparar el envío: {exc}")
+            return
+
         nombres_capturas = ", ".join(ruta.name for ruta in self._capturas)
         visible = mensaje + (f"\n\nCapturas: {nombres_capturas}" if nombres_capturas else "")
         self._agregar_burbuja("user", visible)
-        self.entrada.clear()
+        self.entrada.setReadOnly(True)
         self.boton_enviar.setEnabled(False)
         self.boton_crear.setEnabled(False)
         self.boton_copiar.setEnabled(False)
         self._puntos = 0
         self._timer_pensando.start()
+        self.estado.setText(f"Generando con {modelo}…")
+        self.boton_enviar.setText("Generando…")
+        self.panel_resultado.hide()
+        for widget in (self.combo_modelo, self.combo_automatizacion, self.boton_adjuntar,
+                       self.boton_limpiar, self.boton_quitar, self.boton_clave, self.boton_olvidar,
+                       self.boton_modelos, self._sugerencias):
+            widget.setEnabled(False)
 
-        nombre = self.combo_automatizacion.currentData()
-        contexto = construir_contexto_proyecto(nombre)
         self._worker = _GeminiWorker(
             mensaje,
             list(self._historial),
@@ -702,11 +858,14 @@ class AssistantView(QWidget):
         self._timer_pensando.stop()
         self.estado.setText(f"Respuesta de {respuesta.modelo}")
         self._ultima_respuesta = respuesta.texto
+        self.entrada.clear()
         self._historial.extend((("user", mensaje), ("model", respuesta.texto)))
         self._agregar_burbuja("model", respuesta.texto)
         hay_codigo = extraer_codigo_python(respuesta.texto) is not None
         self.boton_crear.setEnabled(hay_codigo)
         self.boton_copiar.setEnabled(hay_codigo)
+        self.codigo_resultado.setPlainText(extraer_codigo_python(respuesta.texto) or "")
+        self.panel_resultado.setVisible(hay_codigo)
         self._limpiar_capturas()
 
     def _al_error(self, mensaje: str) -> None:
@@ -719,6 +878,14 @@ class AssistantView(QWidget):
             self._worker.deleteLater()
         self._worker = None
         self.boton_enviar.setEnabled(True)
+        self.boton_enviar.setText("Generar con Gemini")
+        self.entrada.setReadOnly(False)
+        for widget in (self.combo_modelo, self.combo_automatizacion, self.boton_adjuntar,
+                       self.boton_clave, self._sugerencias):
+            widget.setEnabled(True)
+        self.boton_modelos.setEnabled(self._worker_modelos is None)
+        self._actualizar_estado_clave()
+        self._refrescar_capturas()
 
     def _copiar_codigo(self) -> None:
         codigo = extraer_codigo_python(self._ultima_respuesta)

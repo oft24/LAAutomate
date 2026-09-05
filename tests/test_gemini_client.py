@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from PIL import Image
 
 import pytest
 
@@ -32,7 +33,7 @@ class _SesionFalsa:
 
 def test_gemini_envia_clave_en_header_y_captura_inline(tmp_path) -> None:
     captura = tmp_path / "pantalla.png"
-    captura.write_bytes(b"imagen-de-prueba")
+    Image.new("RGB", (4, 4), "white").save(captura)
     sesion = _SesionFalsa()
 
     respuesta = GeminiClient(
@@ -46,7 +47,7 @@ def test_gemini_envia_clave_en_header_y_captura_inline(tmp_path) -> None:
     assert opciones["headers"]["x-goog-api-key"] == "clave-prueba"
     partes = opciones["json"]["contents"][-1]["parts"]
     assert partes[0]["inline_data"]["mime_type"] == "image/png"
-    assert base64.b64decode(partes[0]["inline_data"]["data"]) == b"imagen-de-prueba"
+    assert base64.b64decode(partes[0]["inline_data"]["data"]) == captura.read_bytes()
     assert "acciones permitidas" in partes[-1]["text"]
     assert respuesta.texto == "respuesta lista"
     assert respuesta.tokens_entrada == 42

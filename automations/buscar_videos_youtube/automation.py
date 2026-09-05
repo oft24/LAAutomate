@@ -17,6 +17,7 @@ página no cambie.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from selenium.common.exceptions import TimeoutException, WebDriverException
@@ -34,6 +35,17 @@ MAX_POR_BUSQUEDA = int(var("YT_MAX_RESULTADOS", "5"))
 PAUSA_ENTRE_BUSQUEDAS = float(var("YT_PAUSA", "3"))
 
 COLUMNAS_MINIMAS = ("tema",)
+
+# Lo que lleva la plantilla que se crea si el Excel no existe.
+COLUMNAS_PLANTILLA = [
+    ("tema", "Qué buscar. Obligatorio."),
+    ("canal", "Canal concreto, opcional. Se añade al texto de búsqueda."),
+]
+EJEMPLOS_PLANTILLA = [
+    {"tema": "automatización con python", "canal": ""},
+    {"tema": "selenium tutorial", "canal": "Código Espinoza"},
+    {"tema": "power automate vs python", "canal": ""},
+]
 
 # Selectores verificados contra la página real el 2026-09-04. YouTube
 # convive con componentes viejos (ytd-*) y nuevos (yt-*-view-model); estos
@@ -97,13 +109,67 @@ def url_de_busqueda(consulta: str) -> str:
     return f"https://www.youtube.com/results?search_query={quote_plus(consulta)}"
 
 
+def crear_plantilla(destino: Path) -> None:
+    """Escribe el Excel de búsquedas con su cabecera y unos ejemplos.
+
+    Vive aquí y no solo en `tools/plantilla_videos.py` porque la app
+    instalada no trae Python ni esa carpeta: decirle a alguien que corra un
+    script que no tiene es un callejón sin salida.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    destino.parent.mkdir(parents=True, exist_ok=True)
+
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = "busquedas"
+    encabezado = Font(bold=True, color="FFFFFF")
+    fondo = PatternFill("solid", fgColor="1F4E5F")
+    for columna, (nombre, _ayuda) in enumerate(COLUMNAS_PLANTILLA, start=1):
+        celda = hoja.cell(row=1, column=columna, value=nombre)
+        celda.font = encabezado
+        celda.fill = fondo
+        celda.alignment = Alignment(horizontal="center")
+        hoja.column_dimensions[get_column_letter(columna)].width = 38
+
+    for fila, ejemplo in enumerate(EJEMPLOS_PLANTILLA, start=2):
+        for columna, (nombre, _ayuda) in enumerate(COLUMNAS_PLANTILLA, start=1):
+            hoja.cell(row=fila, column=columna, value=ejemplo[nombre])
+    hoja.freeze_panes = "A2"
+
+    guia = libro.create_sheet("guía")
+    guia["A1"], guia["B1"] = "columna", "qué va aquí"
+    guia["A1"].font = guia["B1"].font = Font(bold=True)
+    for fila, (nombre, ayuda) in enumerate(COLUMNAS_PLANTILLA, start=2):
+        guia.cell(row=fila, column=1, value=nombre)
+        guia.cell(row=fila, column=2, value=ayuda)
+    guia.cell(row=len(COLUMNAS_PLANTILLA) + 3, column=1, value="cómo añadir")
+    guia.cell(
+        row=len(COLUMNAS_PLANTILLA) + 3,
+        column=2,
+        value="Escribe filas nuevas y vuelve a ejecutar la automatización. "
+        "Las búsquedas que ya tienen resultados se saltan; solo se consultan las nuevas.",
+    )
+    guia.column_dimensions["A"].width = 20
+    guia.column_dimensions["B"].width = 80
+    libro.save(destino)
+
+
 @registrar(nombre="buscar_videos_youtube", disparador="manual", categoria="investigacion")
 class BuscarVideosYoutube(BaseAutomation):
     def ejecutar(self) -> AutomationResult:
         if not EXCEL_ENTRADA.exists():
-            raise FileNotFoundError(
-                f"No encuentro {EXCEL_ENTRADA}. Genera la plantilla con "
-                "`python tools/plantilla_videos.py`."
+            crear_plantilla(EXCEL_ENTRADA)
+            return AutomationResult(
+                success=True,
+                message=(
+                    f"No había búsquedas todavía, así que creé la plantilla en "
+                    f"{EXCEL_ENTRADA}. Ábrela, escribe tus temas en la columna «tema» "
+                    "y vuelve a ejecutar."
+                ),
+                data={"plantilla_creada": str(EXCEL_ENTRADA)},
             )
 
         filas = self.excel.leer(EXCEL_ENTRADA)
@@ -278,7 +344,9 @@ class BuscarVideosYoutube(BaseAutomation):
                 for m in elemento.find_elements(By.CSS_SELECTOR, METADATOS)
             ]
             metadatos = [m for m in metadatos if m]
-        except (WebDriverException, Exception):  # noqa: BLE001
+        except WebDriverException:
+            # Los metadatos (vistas, antiguedad) son opcionales: si YouTube
+            # cambia ese bloque, la fila sale sin ellos en vez de perderse.
             pass
 
         return {

@@ -1,6 +1,6 @@
 """Iconos de la interfaz: SVG de trazo dibujados aqui, no glifos de fuente.
 
-Antes la sidebar usaba caracteres sueltos (⌂ ⚙ ◉ ◷ ▤ ▣ ◈). Se veian
+Antes la sidebar dibujaba cada icono con un caracter suelto. Se veian
 distinto en cada equipo (dependen de la fuente que Windows tenga para ese
 bloque Unicode), no se pueden recolorear con el estado activo del boton
 --el color del texto los arrastra a todos-- y no escalan a un tamano
@@ -33,6 +33,7 @@ _TRAZOS: dict[str, str] = {
     '<path d="M13.2 3.2H9.8c-1 0-1.8.8-1.8 1.8v8c0-.7.6-1.3 1.3-1.3h3.9z"/>',
     "asistente": '<path d="M3.2 3.4h9.6v7.2H8l-2.8 2v-2H3.2z"/>'
     '<path d="M8 5.2v3.6M6.2 7h3.6"/>',
+    "cerrar": '<path d="M4.2 4.2 11.8 11.8M11.8 4.2 4.2 11.8"/>',
     "chevron_izq": '<path d="M9.8 3.5 5.3 8l4.5 4.5"/>',
     "chevron_der": '<path d="M6.2 3.5 10.7 8l-4.5 4.5"/>',
     "buscar": '<circle cx="7.2" cy="7.2" r="4.2"/><path d="M10.3 10.3 13.4 13.4"/>',

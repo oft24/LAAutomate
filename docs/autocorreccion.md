@@ -1,7 +1,15 @@
+---
+tags: [laautomate, ia, autocorreccion]
+alias: ["Autocorreccion", "Reparacion automatica"]
+---
+
 # Autocorrección
 
 Cuando una automatización falla, no termina ahí: se diagnostica con la
-captura del momento exacto, se arregla y se reanuda. Hasta **5 intentos**.
+captura del momento exacto, se arregla y se reanuda. Hasta **3 intentos**.
+
+No se dispara solo: lo arranca el botón **Corregir código** de la vista
+Automatizaciones, cuando una ejecución ha fallado.
 
 ```
         ┌──────────────┐
@@ -59,7 +67,7 @@ Un cron que reescribe código a las 3 de la mañana sin que nadie mire es una
 forma excelente de despertarse con una automatización que hace algo
 distinto de lo que hacía. La reparación pide una persona delante.
 
-## Cuándo se para antes de los 5 intentos
+## Cuándo se para antes de los 3 intentos
 
 - **El arreglo es idéntico al código actual.** Insistir solo gasta cuota.
 - **La respuesta no trae bloque de código.**
@@ -165,6 +173,15 @@ Cuesta una llamada extra; se apaga con `Autocorrector(..., mejorar_prompt=False)
   hacía. Por eso el código queda visible en el editor y el relato en el
   chat: revísalo.
 - Cada intento **ejecuta de verdad** sobre tus aplicaciones. Cinco intentos
-  son cinco ejecuciones reales.
+  son tres ejecuciones reales.
 - El modelo no ve la pantalla mientras la automatización corre, solo la
   captura del instante del fallo.
+
+---
+
+## Notas relacionadas
+
+- [[prompts]] - el prompt de reparacion y el que lo mejora
+- [[PRACTICAS]] - donde queda lo aprendido de cada arreglo
+- [[PROMPT_CHANGELOG]] - historial de versiones del prompt
+- [[arquitectura]] - el runner que detecta el fallo

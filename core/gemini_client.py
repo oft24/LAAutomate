@@ -7,6 +7,7 @@ variable ``GEMINI_API_KEY`` y se envía únicamente en el header de la petición
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import mimetypes
 import re
 import sys
@@ -17,6 +18,7 @@ from typing import Iterable
 from urllib.parse import quote
 
 import requests
+from PIL import Image, UnidentifiedImageError
 
 from core.config import BASE_DIR, var
 from core.vault import Vault
@@ -108,6 +110,40 @@ def tiene_api_key() -> bool:
     return bool(obtener_api_key())
 
 
+def validar_capturas(capturas: Iterable[Path]) -> list[tuple[str, bytes]]:
+    """Verifica contenido y tamaño antes de enviar o mostrar una imagen."""
+    resultado = []
+    total = 0
+    formatos = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}
+    for valor in capturas:
+        ruta = Path(valor)
+        try:
+            if not ruta.is_file():
+                raise ErrorGemini(f"No encuentro la captura: {ruta.name}")
+            mime = mimetypes.guess_type(ruta.name)[0]
+            if mime not in _MIMES_IMAGEN:
+                raise ErrorGemini(f"Formato no admitido para {ruta.name}; usa PNG, JPG o WEBP.")
+            total += ruta.stat().st_size
+            if total > MAX_BYTES_CAPTURAS:
+                raise ErrorGemini("Las capturas superan 12 MB en total. Adjunta menos imágenes.")
+            with ruta.open("rb") as archivo:
+                datos = archivo.read(MAX_BYTES_CAPTURAS + 1)
+            if len(datos) > MAX_BYTES_CAPTURAS:
+                raise ErrorGemini("La captura supera 12 MB.")
+            with Image.open(BytesIO(datos)) as imagen:
+                if formatos.get(imagen.format) != mime:
+                    raise ErrorGemini(f"El contenido de {ruta.name} no coincide con su formato.")
+                if imagen.width * imagen.height > 25_000_000:
+                    raise ErrorGemini(f"Reduce la resolución de {ruta.name} (máximo 25 megapíxeles).")
+                imagen.verify()
+            resultado.append((mime, datos))
+        except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+            raise ErrorGemini(f"No se pudo leer la imagen {ruta.name}; puede estar dañada.") from exc
+    if sum(len(datos) for _, datos in resultado) > MAX_BYTES_CAPTURAS:
+        raise ErrorGemini("Las capturas superan 12 MB en total.")
+    return resultado
+
+
 def extraer_codigo_python(texto: str) -> str | None:
     """Extrae el primer bloque Python de una respuesta Markdown."""
     coincidencia = re.search(r"```(?:python|py)\s*\n(.*?)```", texto, re.IGNORECASE | re.DOTALL)
@@ -148,6 +184,24 @@ def extraer_json(texto: str) -> dict:
     return datos
 
 
+_WIKILINK = re.compile(r"\[\[([^\]|#]+?)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]")
+_CALLOUT = re.compile(r"^> \[!\w+\][+-]? *(.*)$", re.M)
+
+
+def limpiar_nota(markdown: str) -> str:
+    """Quita la decoracion de Obsidian de una nota antes de mandarla.
+
+    Metadatos YAML, enlaces `[[nota]]` y avisos `> [!warning] Titulo`.
+    Para el modelo son ruido, y los enlaces apuntan a notas que no recibe.
+    """
+    if markdown.startswith("---\n"):
+        cierre = markdown.find("\n---", 4)
+        if cierre != -1:
+            markdown = markdown[cierre + 4 :].lstrip("\n")
+    markdown = _WIKILINK.sub(lambda m: m.group(2) or m.group(1), markdown)
+    return _CALLOUT.sub(r"> **\1**", markdown)
+
+
 def construir_contexto_proyecto(nombre_automatizacion: str | None = None) -> str:
     """Contexto versionado para Gemini; nunca incluye .env, logs ni secretos."""
     partes = [
@@ -162,9 +216,11 @@ def construir_contexto_proyecto(nombre_automatizacion: str | None = None) -> str
     ):
         ruta = _ruta_recurso(relativa)
         if ruta.exists():
-            partes.append(f"\n## {relativa.as_posix()}\n{ruta.read_text(encoding='utf-8')}")
+            partes.append(f"\n## {relativa.as_posix()}\n{limpiar_nota(ruta.read_text(encoding='utf-8'))}")
 
     if nombre_automatizacion:
+        from engine.almacen import validar_nombre
+        validar_nombre(nombre_automatizacion)
         ruta_codigo = BASE_DIR / "automations" / nombre_automatizacion / "automation.py"
         if ruta_codigo.exists():
             partes.append(
@@ -364,7 +420,7 @@ def explicar_http(respuesta: requests.Response) -> str:
             "retirado SIGUE apareciendo en la lista pero ya no se puede llamar (pasa con "
             "gemini-2.5-pro y gemini-2.5-flash en cuentas nuevas). Elige uno mas nuevo."
         ),
-        429: "Te pasaste de la cuota del plan gratuito. Espera un minuto o usa un modelo Flash.",
+        429: "Se alcanzó un límite de cuota. Revisa los límites de tu proyecto o reintenta más tarde.",
         500: "Error interno de Google. Reintenta en unos segundos.",
         503: "El modelo esta saturado ahora mismo. Reintenta o elige otro modelo Flash.",
     }
@@ -428,18 +484,7 @@ class GeminiClient:
                 contents.append({"role": rol_api, "parts": [{"text": texto.strip()}]})
 
         partes_turno: list[dict] = []
-        total_bytes = 0
-        for ruta in capturas:
-            ruta = Path(ruta)
-            if not ruta.exists() or not ruta.is_file():
-                raise ErrorGemini(f"No encuentro la captura: {ruta.name}")
-            mime = mimetypes.guess_type(ruta.name)[0] or ""
-            if mime not in _MIMES_IMAGEN:
-                raise ErrorGemini(f"Formato no admitido para {ruta.name}; usa PNG, JPG o WEBP.")
-            datos = ruta.read_bytes()
-            total_bytes += len(datos)
-            if total_bytes > MAX_BYTES_CAPTURAS:
-                raise ErrorGemini("Las capturas superan 12 MB en total. Adjunta menos imágenes.")
+        for mime, datos in validar_capturas(capturas):
             partes_turno.append(
                 {
                     "inline_data": {
@@ -492,7 +537,7 @@ class GeminiClient:
         try:
             datos = respuesta.json()
             candidatos = datos.get("candidates") or []
-            partes = candidatos[0]["content"]["parts"] if candidatos else []
+            partes = candidatos[0].get("content", {}).get("parts", []) if candidatos else []
             # Se descartan las partes marcadas thought=True: son el
             # borrador interno de los modelos con razonamiento (2.5 en
             # adelante), no la respuesta. Colarlas en el texto final
@@ -501,8 +546,11 @@ class GeminiClient:
             texto = "\n".join(
                 parte["text"] for parte in partes if parte.get("text") and not parte.get("thought")
             ).strip()
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
             raise ErrorGemini("Gemini devolvió una respuesta que no pude interpretar.") from exc
+
+        if candidatos and candidatos[0].get("finishReason") == "MAX_TOKENS" and texto:
+            raise ErrorGemini("La respuesta quedó incompleta por el límite de salida. Divide el flujo en pasos más pequeños y vuelve a generar.")
 
         if not texto:
             bloqueo = datos.get("promptFeedback", {}).get("blockReason")

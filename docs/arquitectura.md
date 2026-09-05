@@ -1,3 +1,8 @@
+---
+tags: [laautomate, arquitectura, interno]
+alias: ["Arquitectura", "Como funciona por dentro"]
+---
+
 # Arquitectura
 
 LaAutomate tiene tres capas que casi no se conocen entre sí:
@@ -18,9 +23,9 @@ y llena _REGISTRY             disparador cron/carpeta          │
                                                                ├─ Vault.credenciales_para(nombre)
                                                                ├─ ActionBundle.crear(logger)
                                                                ├─ instancia.ejecutar()
-                                                               │    éxito → AutomationResult
-                                                               │    excepción → screenshot + traceback
-                                                               └─ guardar_ejecucion() → SQLite
+                                                               │    éxito -> AutomationResult
+                                                               │    excepción -> screenshot + traceback
+                                                               └─ guardar_ejecucion() -> SQLite
 ```
 
 ### 1. Descubrimiento — `engine/registry.py`
@@ -48,8 +53,10 @@ Envuelve APScheduler. Al iniciar recorre el registry y traduce cada disparador:
 | `manual` | Nada: solo se ejecuta desde la UI o `manage.py ejecutar`. |
 | `cron:M H D M DS` | `CronTrigger.from_crontab()` — cron estándar de 5 campos. |
 | `carpeta:C:/ruta` | `engine/triggers/file_watcher.py` (watchdog), dispara al crear un archivo. |
-| `webhook` | Se registra aparte en `engine/triggers/webhook_listener.py` (FastAPI local). |
-| `correo` | Se registra aparte en `engine/triggers/email_watcher.py` (polling IMAP). |
+
+Cualquier otra cadena se anota en el log como disparador desconocido. No se acepta
+en silencio: una automatización que nunca se dispara y nunca avisa es peor que una
+que falla.
 
 `proximas_ejecuciones()` es lo que alimenta la vista **Programador** y el KPI de
 "Próxima ejecución" del panel principal.
@@ -59,7 +66,7 @@ Envuelve APScheduler. Al iniciar recorre el registry y traduce cada disparador:
 El runner es el único lugar donde una automatización se instancia, y hace siempre lo
 mismo:
 
-1. Crea un logger con el nombre de la automatización → `logs/<nombre>.log`.
+1. Crea un logger con el nombre de la automatización -> `logs/<nombre>.log`.
 2. Arma el `ActionBundle` (web, excel, http, correo, escritorio, copiloto).
 3. Pide las credenciales de esa automatización a la bóveda.
 4. Llama `ejecutar()`.
@@ -139,3 +146,11 @@ del que dependen el título de la ventana y la marca de la barra lateral.
   en el hilo, que solo surte efecto en el siguiente bytecode que ese hilo ejecute.
 - No hay reintentos automáticos ni colas: un fallo se registra, no se reintenta.
 - No hay multiusuario ni servidor central: todo es local a la máquina.
+
+---
+
+## Notas relacionadas
+
+- [[acciones]] - lo que el runner inyecta en cada automatizacion
+- [[autocorreccion]] - que pasa cuando el runner registra un fallo
+- [[desarrollo]] - estructura del repositorio y pruebas

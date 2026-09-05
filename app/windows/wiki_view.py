@@ -142,13 +142,13 @@ _COMO_FUNCIONA = [
     "El decorador @registrar(nombre=..., disparador=...) sobre la clase es lo único que hace falta para "
     "que la app la descubra sola -- al arrancar, escanea la carpeta automations/ e importa todo lo que "
     "encuentra, sin que tengas que registrar nada a mano en ningún otro lado.",
-    "Correrla manualmente (botón “Ejecutar”), programada (cron, desde el Programador) o disparada por "
-    "correo/carpeta/webhook siempre pasa por el mismo motor: corre en un hilo aparte para no congelar la "
+    "Correrla manualmente (botón “Ejecutar”), programada (cron declarado en el código) o disparada al "
+    "aparecer un archivo en una carpeta vigilada siempre pasa por el mismo motor: corre en un hilo aparte para no congelar la "
     "app, captura cualquier error con su traceback y una captura de pantalla, y guarda el resultado en el "
     "Historial (visible desde el Panel principal y Registros).",
     "La Grabadora (Web o Escritorio) no genera configuración: observa tus clics y tecleo reales y "
     "traduce cada paso a una llamada de self.web/.escritorio -- el resultado es un automation.py normal, "
-    "editable como cualquier otro, no una caja negra.",
+    "editable como cualquier otro. Detener genera el borrador; revisa el código y pulsa Guardar automatización para registrarlo.",
     "Las credenciales (self.credenciales.usuario/password) nunca viven escritas en el código: se "
     "guardan cifradas en el almacén de credenciales de Windows a través de la Bóveda, y se inyectan en "
     "tiempo de ejecución según el nombre de la automatización.",
@@ -168,7 +168,7 @@ _HERRAMIENTAS = [
         "Escucha global de mouse/teclado -- lo que usa la Grabadora de escritorio para grabar lo que "
         "haces, sin importar la app.",
     ),
-    ("APScheduler", "Programa automatizaciones por cron/intervalos (el Programador)."),
+    ("APScheduler", "Programa los disparadores cron declarados en el código. La aplicación debe permanecer abierta."),
     ("keyring", "Guarda usuario/contraseña cifrados en el almacén de credenciales de Windows (la Bóveda)."),
     ("pandas + openpyxl", "Lectura y escritura de archivos Excel (self.excel)."),
     ("SQLite", "Guarda el historial de cada ejecución -- sin necesitar un servidor de base de datos aparte."),
@@ -191,8 +191,8 @@ class WikiView(QWidget):
             )
         )
 
-        layout.addWidget(self._construir_tarjeta_parrafos("Cómo funciona la app", _COMO_FUNCIONA))
-        layout.addWidget(
+        self._introduccion = self._construir_tarjeta_parrafos("Cómo funciona la app", _COMO_FUNCIONA)
+        self._herramientas = (
             self._construir_tarjeta_herramientas(
                 "Herramientas que usamos",
                 "Cada pieza tiene un trabajo específico -- ninguna es reemplazable por \"magia\", todas son "
@@ -200,7 +200,6 @@ class WikiView(QWidget):
                 _HERRAMIENTAS,
             )
         )
-        layout.addWidget(self._subtitulo_seccion("Referencia de acciones (self.<módulo>)"))
 
         self.campo_busqueda = QLineEdit()
         self.campo_busqueda.setPlaceholderText('Buscar método o palabra clave… (ej. "teams", "excel", "click")')
@@ -216,6 +215,14 @@ class WikiView(QWidget):
         layout_tarjetas.setContentsMargins(0, 0, ESPACIADO.sm, 0)
         area.setWidget(contenedor)
         layout.addWidget(area, stretch=1)
+
+        layout_tarjetas.addWidget(self._introduccion)
+        layout_tarjetas.addWidget(self._herramientas)
+        layout_tarjetas.addWidget(self._subtitulo_seccion("Referencia de acciones (self.<módulo>)"))
+        self._sin_resultados = QLabel("No hay coincidencias. Prueba con otra acción o módulo.")
+        self._sin_resultados.setWordWrap(True)
+        self._sin_resultados.hide()
+        layout_tarjetas.addWidget(self._sin_resultados)
 
         self._tarjetas: list[tuple[QFrame, list[tuple[QLabel, QLabel, str]]]] = []
         for categoria in _CATEGORIAS:
@@ -339,6 +346,9 @@ class WikiView(QWidget):
 
     def _filtrar(self, texto: str) -> None:
         consulta = texto.strip().lower()
+        self._introduccion.setVisible(not consulta)
+        self._herramientas.setVisible(not consulta)
+        hay_resultados = False
         for tarjeta, filas in self._tarjetas:
             alguna_visible = False
             for etiqueta_metodo, etiqueta_desc, texto_busqueda in filas:
@@ -347,3 +357,5 @@ class WikiView(QWidget):
                 etiqueta_desc.setVisible(visible)
                 alguna_visible = alguna_visible or visible
             tarjeta.setVisible(alguna_visible)
+            hay_resultados = hay_resultados or alguna_visible
+        self._sin_resultados.setVisible(bool(consulta) and not hay_resultados)

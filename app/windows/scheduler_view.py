@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
+    QPushButton,
     QStackedLayout,
     QTableWidget,
     QTableWidgetItem,
@@ -36,6 +38,12 @@ class SchedulerView(QWidget):
         layout.addWidget(
             PageHeader("Programador", "Disparadores activos y cuándo va a correr cada automatización")
         )
+        ayuda = QLabel("El horario se guarda en el código: cron:minuto hora día mes día-semana. La app debe estar abierta para ejecutarlo.")
+        ayuda.setWordWrap(True)
+        layout.addWidget(ayuda)
+        editar = QPushButton("Editar disparador en Automatizaciones")
+        editar.clicked.connect(self._editar_disparador)
+        layout.addWidget(editar)
 
         fila_kpis = QHBoxLayout()
         fila_kpis.setSpacing(ESPACIADO.lg)
@@ -103,6 +111,14 @@ class SchedulerView(QWidget):
     def refrescar(self) -> None:
         self._llenar()
 
+    def _editar_disparador(self) -> None:
+        ventana = self.window()
+        fila = self.tabla.currentRow()
+        if fila >= 0 and hasattr(ventana, "automations_view"):
+            ventana.automations_view.refrescar(seleccionar=self.tabla.item(fila, 0).text())
+        if hasattr(ventana, "sidebar"):
+            ventana.sidebar.establecer_vista("automatizaciones")
+
     def _llenar(self) -> None:
         especificaciones = listar()
         self._pila.setCurrentWidget(self._vacio if not especificaciones else self.tabla)
@@ -111,9 +127,11 @@ class SchedulerView(QWidget):
 
         self.tabla.setRowCount(len(especificaciones))
         n_programadas = 0
+        n_manuales = 0
         for i, spec in enumerate(especificaciones):
             es_cron = spec.disparador.startswith("cron:")
             n_programadas += es_cron
+            n_manuales += spec.disparador == "manual"
 
             self.tabla.setItem(i, 0, QTableWidgetItem(spec.nombre))
             self.tabla.setItem(i, 1, self._item_centrado(spec.categoria))
@@ -125,12 +143,16 @@ class SchedulerView(QWidget):
                 texto_proxima = "—"
             self.tabla.setItem(i, 3, self._item_centrado(texto_proxima))
 
-            self.tabla.setCellWidget(
-                i, 4, self._centrado(StatusBadge("programado" if es_cron else "manual"))
-            )
+            if spec.disparador.startswith("carpeta:"):
+                estado = QLabel("Carpeta")
+            elif es_cron and spec.nombre not in proximas:
+                estado = QLabel("Sin activar")
+            else:
+                estado = StatusBadge("programado" if es_cron else "manual")
+            self.tabla.setCellWidget(i, 4, self._centrado(estado))
 
         self.kpi_programadas.actualizar_valor(str(n_programadas))
-        self.kpi_manuales.actualizar_valor(str(len(especificaciones) - n_programadas))
+        self.kpi_manuales.actualizar_valor(str(n_manuales))
         if proximas:
             primera = min(proximas.values())
             self.kpi_proxima.actualizar_valor(primera.strftime("%d %b %H:%M"))

@@ -44,15 +44,6 @@ class Vault:
             token=keyring.get_password(_SERVICIO, f"{nombre}:token"),
         )
 
-    def tiene_credenciales(self, nombre: str) -> bool:
-        """keyring (Windows Credential Manager) no ofrece una forma
-        generica de LISTAR todas las claves guardadas -- por eso la UI no
-        puede simplemente "enumerar la Boveda". En su lugar, se pregunta
-        por cada automatizacion YA CONOCIDA (via engine.registry.listar())
-        si tiene algo guardado, usando el mismo nombre exacto."""
-        c = self.credenciales_para(nombre)
-        return bool(c.usuario or c.password or c.token)
-
     def eliminar(self, nombre: str) -> None:
         for clave in ("usuario", "password", "token"):
             try:

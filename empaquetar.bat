@@ -12,7 +12,9 @@ echo [1/3] Compilando con PyInstaller...
 echo [2/3] Copiando archivos auxiliares...
 copy /y README.md dist\LaAutomate\ >nul
 copy /y .env.example dist\LaAutomate\ >nul
-xcopy automations dist\LaAutomate\automations\ /E /I /Q /Y >nul
+REM /EXCLUDE deja fuera los __pycache__: son bytecode del interprete de
+REM desarrollo, no sirven en la instalacion y solo ocupan sitio.
+xcopy automations dist\LaAutomate\automations\ /E /I /Q /Y /EXCLUDE:instalador\excluir.txt >nul
 copy /y instalador\INSTALL.bat dist\LaAutomate\ >nul
 copy /y instalador\UNINSTALL.bat dist\LaAutomate\ >nul
 

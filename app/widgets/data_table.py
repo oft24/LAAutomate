@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.resources.iconos import icono
 from app.resources.tokens import COLORES, DENSIDAD, ESPACIADO
 from app.widgets.status_badge import StatusBadge
 
@@ -69,7 +70,7 @@ class DataTable(QWidget):
         layout.setSpacing(ESPACIADO.md)
 
         self.tabla = QTableWidget(0, 6)
-        self.tabla.setHorizontalHeaderLabels(["Automatización", "Estado", "Cuándo", "Duración", "Error", ""])
+        self.tabla.setHorizontalHeaderLabels(["Automatización", "Estado", "Cuándo", "Duración", "Resultado", ""])
         self.tabla.verticalHeader().hide()
         self.tabla.verticalHeader().setDefaultSectionSize(DENSIDAD.alto_fila)
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -86,10 +87,12 @@ class DataTable(QWidget):
         # "Completa". Un ancho fijo generoso evita ese corte.
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(1, 130)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(2, 165)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(5, 36)
 
         layout.addWidget(self.tabla, stretch=1)
 
@@ -112,7 +115,9 @@ class DataTable(QWidget):
         self._panel_titulo.setStyleSheet("font-weight: 600; font-size: 14px;")
         fila_cierre.addWidget(self._panel_titulo)
         fila_cierre.addStretch()
-        boton_cerrar = QPushButton("✕")
+        boton_cerrar = QPushButton()
+        boton_cerrar.setIcon(icono("cerrar", COLORES.grafito_claro, 12))
+        boton_cerrar.setToolTip("Cerrar el detalle")
         boton_cerrar.setFixedSize(24, 24)
         boton_cerrar.clicked.connect(lambda: panel.hide())
         fila_cierre.addWidget(boton_cerrar)

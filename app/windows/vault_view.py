@@ -61,6 +61,7 @@ class VaultView(QWidget):
         tarjeta = QFrame()
         tarjeta.setObjectName("tarjeta")
         tarjeta.setMaximumWidth(420)
+        tarjeta.setMinimumWidth(340)
         v = QVBoxLayout(tarjeta)
         v.setContentsMargins(ESPACIADO.xl, ESPACIADO.xl, ESPACIADO.xl, ESPACIADO.xl)
         v.setSpacing(ESPACIADO.md)
@@ -160,7 +161,12 @@ class VaultView(QWidget):
     def _llenar_guardadas(self) -> None:
         filas = []
         for spec in listar():
-            credenciales = self.vault.credenciales_para(spec.nombre)
+            try:
+                credenciales = self.vault.credenciales_para(spec.nombre)
+            except Exception:
+                self.tabla.setRowCount(0)
+                mostrar_toast(self, "No se pudo leer la Bóveda de Windows. Tus credenciales no se han modificado.", "error")
+                return
             if credenciales.usuario or credenciales.password or credenciales.token:
                 filas.append((spec.nombre, credenciales))
 
@@ -203,7 +209,11 @@ class VaultView(QWidget):
         return contenedor
 
     def _editar_credencial(self, nombre: str) -> None:
-        credenciales = self.vault.credenciales_para(nombre)
+        try:
+            credenciales = self.vault.credenciales_para(nombre)
+        except Exception:
+            mostrar_toast(self, "No se pudo leer esta credencial en la Bóveda de Windows.", "error")
+            return
         self._nombre_en_edicion = nombre
 
         self.campo_nombre.setText(nombre)
@@ -246,7 +256,11 @@ class VaultView(QWidget):
         )
         if respuesta != QMessageBox.StandardButton.Yes:
             return
-        self.vault.eliminar(nombre)
+        try:
+            self.vault.eliminar(nombre)
+        except Exception:
+            mostrar_toast(self, "No se pudo completar la eliminación. Revisa la Bóveda antes de reintentar.", "error")
+            return
         self._llenar_guardadas()
         mostrar_toast(self, f"Credenciales de “{nombre}” eliminadas de la Bóveda.", "info")
 
@@ -290,6 +304,9 @@ class VaultView(QWidget):
         if not nombre:
             mostrar_toast(self, "Escribe el nombre de la automatización antes de guardar.", "error")
             return
+        if nombre not in {spec.nombre for spec in listar()}:
+            mostrar_toast(self, "Selecciona el nombre de una automatización registrada para poder recuperar sus credenciales aquí.", "error")
+            return
 
         usuario = self.campo_usuario.text()
         password = self.campo_password.text()
@@ -308,10 +325,14 @@ class VaultView(QWidget):
         # contraseña vacía al editar (para conservar la ya guardada) no
         # debe borrarla, a diferencia del Vault.guardar() original que
         # sobrescribe ambos campos siempre.
-        if usuario:
-            self.vault.guardar_usuario(nombre, usuario)
-        if password:
-            self.vault.guardar_password(nombre, password)
+        try:
+            if usuario:
+                self.vault.guardar_usuario(nombre, usuario)
+            if password:
+                self.vault.guardar_password(nombre, password)
+        except Exception:
+            mostrar_toast(self, "No se completó el guardado. Algún campo pudo actualizarse; revisa la Bóveda y vuelve a intentarlo.", "error")
+            return
 
         if editando:
             self._cancelar_edicion()

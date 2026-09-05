@@ -1,15 +1,12 @@
-"""Escribir una automatización en disco y dejarla registrada y usable.
+"""Escribe una automatización en disco y la deja registrada y usable.
 
-Antes esto vivía solo dentro de `RecorderView._guardar_automatizacion`, lo
-que significaba que cualquier otra parte de la app que quisiera crear una
-automatización (el Agente IA) tenía que repetir los mismos cuatro pasos --
-y olvidar uno solo (el `__init__.py`, o el reload) produce una carpeta que
-existe en disco pero no aparece en la lista. Aquí está una vez.
+Son cuatro pasos —carpeta, `automation.py`, `__init__.py` y recarga del
+módulo— y saltarse uno produce una carpeta que existe en disco pero no
+aparece en la lista. Por eso están aquí una sola vez, y no repetidos en
+cada sitio que crea automatizaciones (grabadora, asistente, autocorrector).
 
-También vive aquí la validación del nombre, que antes estaba en
-`engine.actions.recorder` (un módulo que arrastra Selenium entero solo por
-dos funciones de texto). `recorder` las reexporta, así que todo lo que ya
-las importaba de ahí sigue funcionando igual.
+La validación del nombre también vive aquí; `engine.actions.recorder` la
+reexporta por compatibilidad.
 """
 from __future__ import annotations
 

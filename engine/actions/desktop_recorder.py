@@ -1,36 +1,24 @@
-"""Grabadora de acciones de escritorio: a diferencia de la Grabadora web
-(que necesita una URL), esta escucha clicks y tecleo del sistema -- sin
-URL ni nada -- e identifica el control bajo el cursor via UI Automation,
-para generar codigo Python listo para correr con self.escritorio
-(DesktopActions).
+"""Grabadora de escritorio: escucha clicks y tecleo del sistema, identifica
+el control bajo el cursor via UI Automation y genera codigo para
+self.escritorio. A diferencia de la grabadora web, no necesita una URL.
 
-Requiere pynput (listener de mouse/teclado) + pywinauto/pywin32
-(identificar el control y la ventana bajo el cursor).
+Requiere pynput (listener) y pywinauto/pywin32 (identificar el control).
 
-SEGURIDAD / DISENO: el primer click tras iniciar() fija la "ventana
-objetivo" de la grabacion (por HWND, no por titulo -- el titulo puede
-cambiar). Todo click o tecla fuera de esa ventana, MIENTRAS la ventana
-objetivo siga abierta, se IGNORA por completo -- ni se identifica el
-control, ni se lee su texto. Esto no es un detalle menor: una version
-anterior escuchaba clicks realmente globales (en cualquier ventana del
-sistema) y, al probarla, un click mal calculado en una pantalla con
-multiples monitores y escalado DPI cayo sobre una ventana de Edge
-completamente distinta, capturando texto sensible de otra aplicacion.
-Limitar la grabacion a una sola ventana elegida por el primer click
-hace que eso sea estructuralmente imposible, no solo improbable.
+Alcance de la grabacion. El primer click tras iniciar() fija la ventana
+objetivo por HWND -- no por titulo, que puede cambiar. Todo click o tecla
+en otra ventana, mientras la objetivo siga abierta, se ignora sin ni
+siquiera leer el control. Una version anterior escuchaba clicks realmente
+globales y un click mal calculado (multiples monitores, escalado DPI) cayo
+sobre una ventana de Edge distinta y capturo texto de otra aplicacion.
+Acotarlo a una ventana hace que eso sea imposible, no solo improbable.
 
-REVINCULACION: si la ventana objetivo se CIERRA durante la grabacion
-(ej. un dialogo de login/busqueda que se cierra y abre una ventana de
-sesion nueva, tipico de un cliente VNC/RDP), el siguiente click SI se
-acepta y la grabacion se revincula a esa ventana nueva -- porque una
-ventana cerrada ya no puede ser el objetivo de un click mal calculado
-del incidente original (ese incidente ocurria con la ventana objetivo
-TODAVIA abierta). Esto es deliberado y necesario para que la grabadora
-sea util en flujos "buscar/lanzar -> abrir app -> interactuar", pero
-sigue siendo una decision que vale la pena poder abortar: cada
-revinculacion se cuenta en ventanas_revinculadas y se avisa en vivo en
-la UI exactamente igual que clicks_ignorados, para que un humano pueda
-notar y detener una revinculacion que no esperaba.
+Revinculacion. Si la ventana objetivo se CIERRA durante la grabacion (un
+dialogo de login que da paso a la ventana de sesion, tipico en VNC/RDP),
+el siguiente click se acepta y la grabacion se revincula. Una ventana
+cerrada ya no puede recibir el click mal calculado del incidente, asi que
+la proteccion sigue en pie. Aun asi cada revinculacion se cuenta en
+`ventanas_revinculadas` y se avisa en vivo, igual que `clicks_ignorados`,
+para que se pueda detener una que no se esperaba.
 """
 from __future__ import annotations
 
@@ -41,8 +29,6 @@ import queue
 import re
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any
 
 import win32con
 import win32gui
@@ -209,29 +195,15 @@ def _foco_de_teclado(hwnd_ventana: int) -> tuple[str | None, bool]:
         return None, False
 
 
-@dataclass
-class ResultadoGrabacionEscritorio:
-    tipo: str  # "pasos" | "error"
-    pasos: list[dict] = field(default_factory=list)
-    detalle: dict[str, Any] = field(default_factory=dict)
-
-
 class GrabadoraEscritorio:
-    """Graba clicks/tecleo. Dos modos:
+    """Graba clicks y tecleo. Dos modos:
 
-    - "unica" (default, seguro): SOLO la ventana que reciba el primer
-      click tras iniciar() -- todo click/tecla en otra ventana, MIENTRAS
-      esa primera siga abierta, se ignora por completo (ver el docstring
-      del modulo para el incidente real que motiva esto).
-    - "multiple" (bajo consentimiento explicito del usuario): graba
-      CUALQUIER click, sin importar en que ventana caiga -- cada cambio
-      de ventana se trata como una transicion legitima (se conecta a la
-      ventana nueva), nunca como un click ignorado. Este modo existe
-      porque el candado de una sola ventana protege contra un click
-      SIMULADO/programatico mal calculado (el incidente real fue asi);
-      un humano real dando clicks con su propio mouse, a proposito,
-      entre varias ventanas de su propio flujo de trabajo, no tiene ese
-      riesgo -- el usuario debe pedirlo explicitamente para activarlo."""
+    - "unica" (por defecto): solo la ventana del primer click; el resto se
+      ignora mientras esa siga abierta. Ver el docstring del modulo.
+    - "multiple": graba cualquier ventana, tratando cada cambio como una
+      transicion legitima. El candado de una sola ventana protege contra un
+      click simulado mal calculado, no contra una persona moviendose a
+      proposito entre sus propias ventanas; por eso hay que pedirlo."""
 
     def __init__(self, logger, modo_ventana: str = "unica") -> None:
         if modo_ventana not in ("unica", "multiple"):

@@ -1,3 +1,8 @@
+---
+tags: [laautomate, referencia, acciones]
+alias: ["Referencia de acciones", "self.web", "self.escritorio"]
+---
+
 # Referencia de acciones
 
 Todo lo que sigue está disponible como atributo de `self` dentro de `ejecutar()`. Lo
@@ -210,7 +215,7 @@ UI Automation. Requiere ambas abiertas y con sesión iniciada.
 | `buscar_agente(nombre)` / `clickear_agente(nombre)` | Localiza y abre un agente de Copilot. |
 | `enviar_prompt(nombre_agente, texto)` | Escribe el prompt y lo envía. |
 | `leer_tabla_de_respuesta()` | Lee la tabla de la respuesta como texto. |
-| `copiar_tabla_de_respuesta()` | Usa el botón "Copy" real de la tabla → queda en el portapapeles con su HTML. |
+| `copiar_tabla_de_respuesta()` | Usa el botón "Copy" real de la tabla -> queda en el portapapeles con su HTML. |
 | `esperar_tabla_de_respuesta(tiempo_maximo=60, intervalo=3)` | Espera a que Copilot termine de responder. |
 | `esperar_y_copiar_tabla(...)` | Las dos anteriores juntas. |
 | `copiar_respuesta_completa()` | Copia toda la respuesta, no solo la tabla. |
@@ -228,8 +233,16 @@ mandar, porque enviar el mensaje al chat equivocado no se puede deshacer.
 
 ## Lo que no es una acción
 
-- **Logs**: `self.logger.info(...)`, `.warning(...)`, `.exception(...)` → van a
+- **Logs**: `self.logger.info(...)`, `.warning(...)`, `.exception(...)` -> van a
   `logs/<nombre>.log` y, si corre desde la app, se ven en vivo en la consola de la
   vista Automatizaciones.
 - **Credenciales**: `self.credenciales.usuario / .password / .token`.
 - **Configuración del equipo**: `from core.config import var`.
+
+---
+
+## Notas relacionadas
+
+- [[escribir-automatizaciones]] - donde se usan estas acciones
+- [[logica-grabadora]] - la grabadora genera llamadas a estas mismas acciones
+- [[arquitectura]] - quien las inyecta y cuando

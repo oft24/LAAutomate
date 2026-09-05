@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QStackedWidget,
     QWidget,
 )
@@ -38,6 +39,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{NOMBRE_APP} - {DESCRIPCION_APP}")
         self.resize(1360, 860)
+        # Por debajo de esto el panel de contexto del Asistente se recorta
+        # contra el borde y sus controles quedan fuera de la ventana.
+        self.setMinimumSize(1100, 700)
         if _RUTA_ICONO.exists():
             self.setWindowIcon(QIcon(str(_RUTA_ICONO)))
         self.setStyleSheet(construir_qss())
@@ -113,8 +117,13 @@ class MainWindow(QMainWindow):
         efecto = QGraphicsOpacityEffect(pagina)
         pagina.setGraphicsEffect(efecto)
         animacion = QPropertyAnimation(efecto, b"opacity", self)
-        animacion.setDuration(190)
-        animacion.setStartValue(0.08)
+        # 130 ms y desde 0.6, no 190 ms desde 0.08. Dos razones: nada
+        # aparece de la nada -- empezar casi en transparente hace que la
+        # vista PARPADEE en vez de fundirse -- y cambiar de vista es de las
+        # acciones que mas se repiten al dia, donde una animacion larga se
+        # percibe como lentitud de la app, no como elegancia.
+        animacion.setDuration(130)
+        animacion.setStartValue(0.6)
         animacion.setEndValue(1.0)
         animacion.setEasingCurve(QEasingCurve.Type.OutCubic)
         animacion.finished.connect(lambda: pagina.setGraphicsEffect(None))
@@ -123,10 +132,32 @@ class MainWindow(QMainWindow):
         animacion.start()
 
     def closeEvent(self, event) -> None:
+        from PySide6.QtCore import QThread
+        vistas = (self.automations_view, self.recorder_view, self.assistant_view)
+        ocupada = any(getattr(v, "_worker", None) is not None for v in vistas)
+        ocupada = ocupada or self.assistant_view._worker_modelos is not None
+        ocupada = ocupada or self.recorder_view._grabadora is not None
+        ocupada = ocupada or any(h.isRunning() for h in self.findChildren(QThread))
+        if ocupada:
+            QMessageBox.information(self, "Hay una operación activa", "Detén la grabación o cancela la ejecución y espera a que termine antes de cerrar. Si Gemini está respondiendo, espera su resultado.")
+            event.ignore()
+            return
+        self.automations_view._conservar_borrador()
+        if self.automations_view._borradores or self.recorder_view._pendiente_guardar:
+            respuesta = QMessageBox.question(self, "Cambios sin guardar", "Hay código sin guardar. ¿Cerrar y descartar estos borradores?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if respuesta != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
         self.recorder_view._detener_listener_f5()
         super().closeEvent(event)
 
     def _al_grabar_automatizacion(self, nombre: str) -> None:
+        from engine.registry import obtener
+        from app.widgets.toast import mostrar_toast
+        try:
+            self.automations_view.scheduler.actualizar(obtener(nombre))
+        except Exception as exc:
+            mostrar_toast(self, f"Código guardado, pero su disparador no se pudo activar: {exc}", "error")
         self.automations_view.refrescar(seleccionar=nombre)
         self.assistant_view.refrescar_contexto()
         self.dashboard.refrescar()

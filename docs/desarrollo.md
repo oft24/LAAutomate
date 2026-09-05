@@ -1,3 +1,8 @@
+---
+tags: [laautomate, desarrollo, interno]
+alias: ["Desarrollo", "Contribuir"]
+---
+
 # Desarrollo
 
 ## Entorno
@@ -61,7 +66,7 @@ Dónde está cubierto qué:
 | `test_grabadora_web_navegador.py` | La captura de texto de la grabadora web contra un navegador real. Marcado `navegador`. |
 | `test_pestanas.py` | Control de pestañas del navegador y que la grabadora siga las que se abren. |
 | `test_pestanas_navegador.py` | El mismo flujo de pestañas contra un navegador real. Marcado `navegador`. |
-| `test_grabadora_validacion.py` | El camino entero de la grabadora de escritorio contra un escritorio falso: `_al_click`/`_al_tecla` → `_depurar_pasos` → código generado. |
+| `test_grabadora_validacion.py` | El camino entero de la grabadora de escritorio contra un escritorio falso: `_al_click`/`_al_tecla` -> `_depurar_pasos` -> código generado. |
 | `test_vista_grabadora.py` | La descripción de pasos en vivo y el selector de logs. |
 | `test_copilot_teams.py` | Lectura y copiado de tablas de Copilot, envío en Teams. |
 | `test_vault.py` | Bóveda de credenciales sobre `keyring`. |
@@ -83,17 +88,22 @@ app/
 engine/
 ├── registry.py         @registrar + descubrimiento
 ├── runner.py           ejecuta, captura errores, guarda historial
-├── scheduler.py        APScheduler + disparadores
+├── scheduler.py        APScheduler: cron y carpeta vigilada
 ├── automation_base.py  BaseAutomation y AutomationResult
+├── almacen.py          escribir una automatizacion en disco y registrarla
+├── bitacora.py         anota cada accion, para saber que pasaba al fallar
+├── diagnostico.py      reune log + captura + causa de un fallo
+├── autocorreccion.py   el ciclo de reparacion (hasta 3 intentos)
+├── practicas.py        lee y amplia docs/PRACTICAS.md
+├── optimizador_prompt.py  versiona docs/PROMPT_REPARACION.md
 ├── actions/            web, excel, http, correo, escritorio, copilot, grabadoras
-└── triggers/           carpeta (watchdog), correo (IMAP), webhook (FastAPI)
+└── triggers/           file_watcher.py: dispara al crear un archivo (watchdog)
 core/
 ├── config.py           rutas base, .env, nombre de la app
 ├── logger.py           un archivo de log por automatización
 ├── database.py         historial en SQLite
 ├── vault.py            credenciales vía keyring
-├── gemini_client.py    chat multimodal; contexto y capturas sin depender de la UI
-└── notifier.py         alerta a Teams/Slack por webhook cuando algo falla
+└── gemini_client.py    chat multimodal; contexto y capturas sin depender de la UI
 automations/            código del usuario
 instalador/             INSTALL.bat / UNINSTALL.bat
 docs/                   esta documentación
@@ -110,22 +120,26 @@ docs/                   esta documentación
   responde solo.
 - **Nada de valores mágicos en la interfaz.** Colores, tamaños y espacios salen de
   `app/resources/tokens.py`.
-- **Nada de secretos en el código.** Contraseñas → bóveda. Datos del equipo → `.env`,
+- **Nada de secretos en el código.** Contraseñas -> bóveda. Datos del equipo -> `.env`,
   leídos con `core.config.var()` y declarados en `.env.example`.
 - **Una automatización que falla lanza una excepción.** No se devuelve `success=False`
   a mano por un error.
 
 ## Deuda conocida
 
-- `automations/ingresointento5`, `intento10` e `ingresovnc2` son grabaciones de prueba
-  contra UltraVNC; sirven de ejemplo del código que genera la grabadora, no son
-  automatizaciones de producción.
-- Los disparadores `webhook` y `correo` se declaran en el decorador pero hay que
-  conectarlos a mano en `engine/triggers/`.
-- No hay reintentos automáticos: un fallo se registra y ahí queda.
+- Los únicos disparadores que existen son `manual`, `cron:` y `carpeta:`. Cualquier
+  otro se anota en el log y la automatización no se dispara nunca.
 - `_control_en()` de la grabadora de escritorio corre dentro del hook de bajo nivel
   de pynput y puede superar el `LowLevelHooksTimeout` (300 ms), lo que retira el
   hook y mata la grabación en silencio.
 - La grabadora web sigue las pestañas **nuevas**, pero no detecta que el usuario
   vuelva a una que ya estaba abierta. Ver
   [Lógica de la Grabadora § Limitaciones conocidas](logica-grabadora.md#limitaciones-conocidas).
+
+---
+
+## Notas relacionadas
+
+- [[arquitectura]] - como encajan las piezas
+- [[empaquetado]] - generar el ejecutable
+- [[escribir-automatizaciones]] - el codigo que escribe quien usa la app

@@ -12,6 +12,8 @@ class KpiCard(QFrame):
         "cian": COLORES.cian,
         "violeta": COLORES.violeta,
         "ocre": COLORES.ocre,
+        "error": COLORES.oxido,
+        "neutro": COLORES.grafito,
     }
 
     def __init__(
@@ -31,6 +33,7 @@ class KpiCard(QFrame):
         layout.setSpacing(4)
 
         acento = QFrame()
+        self._acento = acento
         acento.setFixedHeight(3)
         acento.setStyleSheet(f"background-color: {self._tono}; border-radius: 1px;")
         layout.addWidget(acento)
@@ -58,3 +61,8 @@ class KpiCard(QFrame):
         if valor == self._valor.text():
             return
         self._valor.setText(valor)
+
+    def actualizar_tono(self, tono: str) -> None:
+        self._tono = self._COLORES_TONO.get(tono, COLORES.acento)
+        self._valor.setStyleSheet(f"color: {self._tono};")
+        self._acento.setStyleSheet(f"background-color: {self._tono}; border-radius: 1px;")

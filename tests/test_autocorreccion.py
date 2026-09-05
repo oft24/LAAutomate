@@ -225,14 +225,14 @@ def test_el_tope_de_intentos_se_respeta(sin_efectos, monkeypatch) -> None:
     _con_respuesta(monkeypatch, *respuestas)
     runner = _RunnerFalso(*[_fallo(f"fallo {i}") for i in range(9)])
 
-    reparacion = Autocorrector(runner, max_intentos=5).ejecutar(_SpecFalso())
+    reparacion = Autocorrector(runner, max_intentos=MAX_INTENTOS).ejecutar(_SpecFalso())
 
     assert not reparacion.exito
-    assert len(runner.llamadas) == 5, "cinco ejecuciones, ni una más"
+    assert len(runner.llamadas) == MAX_INTENTOS, "ni una ejecución más que el tope"
     assert "No se pudo reparar" in reparacion.resumen()
 
 
-def test_no_se_pueden_pedir_mas_de_cinco_intentos(sin_efectos, monkeypatch) -> None:
+def test_no_se_pueden_pedir_mas_del_tope(sin_efectos, monkeypatch) -> None:
     """El tope es del sistema, no una sugerencia: cada intento cuesta una
     ejecución real sobre las apps del usuario y una llamada de pago."""
     # Respuestas DISTINTAS: con arreglos idénticos saltaría antes el
@@ -357,7 +357,7 @@ def test_el_prompt_lleva_error_acciones_codigo_y_practicas(sin_efectos, monkeypa
     assert "usa el teclado cuando puedas" in prompt, "las prácticas aprendidas se inyectan"
     assert "status" in prompt, "el contrato JSON debe ir en el prompt"
     assert "{{MAX_REPAIR_ATTEMPTS}}" not in prompt, "los marcadores deben venir sustituidos"
-    assert "MAX_REPAIR_ATTEMPTS = 5" in prompt, "y sustituidos por el valor real"
+    assert f"MAX_REPAIR_ATTEMPTS = {MAX_INTENTOS}" in prompt, "y sustituidos por el valor real"
 
 
 def test_se_avisa_del_progreso_mientras_repara(sin_efectos, monkeypatch) -> None:
@@ -601,3 +601,52 @@ def test_el_agente_ve_lo_que_ya_se_intento(sin_efectos, monkeypatch) -> None:
     prompt = cliente.ultimo_prompt
     assert "Intento 1:" in prompt
     assert "glifo" in prompt, "debe contarle la causa raíz que ya se propuso"
+
+
+# --------------------------------------------------------- cancelacion
+
+
+def test_cancelar_no_empieza_otro_intento(sin_efectos, monkeypatch) -> None:
+    """La cancelación por excepción asíncrona no entra mientras el hilo
+    está dentro de la petición al modelo (120 s de timeout). Sin esta
+    bandera se arrancaba otro intento después de pulsar Cancelar."""
+    _con_respuesta(monkeypatch, *[respuesta(f"CODIGO_NUEVO = {i}") for i in range(9)])
+    runner = _RunnerFalso(*[_fallo("x")] * 9)
+
+    corrector = Autocorrector(runner, cancelado=lambda: True)
+    reparacion = corrector.ejecutar(_SpecFalso())
+
+    assert runner.llamadas == [], "no debería haber ejecutado ni una vez"
+    assert not reparacion.exito
+
+
+def test_cancelar_a_media_no_pide_el_arreglo(sin_efectos, monkeypatch) -> None:
+    """Se cancela con el primer intento ya corrido: se ejecuta una vez y
+    no se llega a gastar una llamada al modelo."""
+    pedidos = []
+    _con_respuesta(monkeypatch, respuesta("CODIGO_NUEVO = 1"))
+    runner = _RunnerFalso(*[_fallo("x")] * 5)
+
+    vueltas = {"n": 0}
+
+    def _cancelado():
+        # False la primera vez (deja correr el intento 1), True después
+        vueltas["n"] += 1
+        return vueltas["n"] > 1
+
+    corrector = Autocorrector(runner, cancelado=_cancelado)
+    reparacion = corrector.ejecutar(_SpecFalso())
+
+    assert len(runner.llamadas) == 1, "corrió una vez y paró"
+    assert not reparacion.exito
+    assert pedidos == []
+
+
+def test_sin_comprobador_el_ciclo_funciona_igual(sin_efectos, monkeypatch) -> None:
+    """`cancelado` es opcional: quien no lo pasa no cambia de comportamiento."""
+    _con_respuesta(monkeypatch, respuesta("CODIGO_NUEVO = 1"))
+    runner = _RunnerFalso(_fallo("x"), _exito())
+
+    reparacion = Autocorrector(runner).ejecutar(_SpecFalso())
+
+    assert reparacion.exito
