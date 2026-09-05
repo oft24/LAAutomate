@@ -27,7 +27,7 @@ Python + PySide6 + Selenium + pywinauto. Windows.
 | **Automatizaciones en Python** | Una carpeta por automatización, una clase que hereda `BaseAutomation` e implementa `ejecutar()`. |
 | **Acciones listas** | Navegador (Selenium, con control de pestañas), Excel (pandas + COM), HTTP, correo (Outlook COM o SMTP), escritorio (pywinauto), Microsoft 365 Copilot + Teams. |
 | **Varias pestañas y varias apps** | Una automatización puede saltar entre pestañas del navegador y entre ventanas de aplicaciones distintas dentro del mismo proceso. |
-| **Disparadores** | Manual, cron, carpeta vigilada, webhook HTTP local, buzón IMAP. |
+| **Disparadores** | Manual, cron y carpeta vigilada. |
 | **Grabadora** | Graba clicks y teclas —en el navegador o en apps de escritorio— y genera el código Python de la automatización. Sigue las pestañas que se abren y, si se le pide, varias ventanas. Nunca graba contraseñas. |
 | **Historial** | Cada corrida queda en SQLite: éxito/fallo, mensaje, duración. Visible en el panel principal. |
 | **Bóveda de credenciales** | Usuarios y contraseñas en el Almacén de credenciales de Windows vía `keyring`, nunca en el código ni en la base de datos. |

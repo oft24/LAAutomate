@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LaAutomate · Laboratorio de compras</title>
+<style>
+:root{color-scheme:dark;font-family:Segoe UI,Arial,sans-serif;color:#eef4fa;background:#080d13}*{box-sizing:border-box}body{margin:0}header,main,footer{max-width:1140px;margin:auto;padding:26px 32px}header{display:flex;align-items:center;gap:12px;border-bottom:1px solid #243242}.logo{background:linear-gradient(#343434,#050505);border:1px solid #555;border-radius:10px;padding:5px 13px;font-size:26px;font-weight:700}.badge{margin-left:auto;border:1px solid #344455;border-radius:20px;padding:7px 13px;color:#aab9ca;font-size:12px}h1{font-size:40px;letter-spacing:-1px;margin:10px 0}p{color:#a8b8cc;line-height:1.6}.eyebrow{color:#28d8bb;font-size:12px;letter-spacing:2px}.intro{display:grid;grid-template-columns:1fr 280px;gap:45px;align-items:center;margin:22px 0 35px}.monitor{height:160px;border:9px solid #253345;border-radius:12px;background:linear-gradient(135deg,#15333a,#087561);display:grid;place-items:center;font-size:46px;font-weight:700;box-shadow:0 20px 80px #00d08412}.panel{background:#101923;border:1px solid #243242;border-radius:14px;padding:24px}form{display:flex;gap:10px;align-items:end}label{display:block;color:#a8b8cc;font-size:13px;margin-bottom:8px}input{width:100%;padding:13px;border:1px solid #34475c;border-radius:8px;background:#0a1119;color:#fff;font:inherit}input:focus,button:focus-visible{outline:2px solid #21dcb0;outline-offset:2px}form div{flex:1}button{padding:14px 24px;border:0;border-radius:8px;background:#00e887;color:#05150e;font-weight:700;cursor:pointer}.meta{display:flex;justify-content:space-between;margin:24px 0 16px;color:#a8b8cc;font-size:13px}table{width:100%;border-collapse:collapse}th{text-align:left;color:#90a7c0;font-size:12px;font-weight:500;padding:12px;border-bottom:1px solid #34475c}td{padding:16px 12px;border-bottom:1px solid #202f40;font-size:14px}.price,.shipping{text-align:right;font-variant-numeric:tabular-nums}.stock{color:#00e887}.out{color:#ffb36c}footer{font-size:12px;color:#8497ac}.hint{font-size:12px}#empty{padding:32px;text-align:center} @media(max-width:800px){.intro{grid-template-columns:1fr}.monitor{display:none}h1{font-size:30px}.panel{overflow:auto}th,td{white-space:nowrap}}
+</style></head><body>
+<header><span class="logo">L</span><strong>LaAutomate / Laboratorio de compras</strong><span class="badge">DEMO LOCAL · DATOS FICTICIOS</span></header>
+<main><section class="intro"><div><span class="eyebrow">DE LA CONSULTA A LA DECISIÓN</span><h1>Una búsqueda.<br>Varios proveedores.</h1><p>Consulta ofertas del mismo producto. La automatización calcula el costo de tu pedido y compara solo las opciones con existencias suficientes.</p></div><div class="monitor" aria-hidden="true">LA / 01</div></section>
+<section class="panel"><form id="search-form"><div><label for="sku">Código de producto (SKU)</label><input id="sku" value="MON-24" placeholder="Ejemplo: MON-24" autocomplete="off"></div><button id="buscar" type="submit">Buscar ofertas</button></form>
+<p class="hint">Catálogo de prueba: MON-24 (monitor), TEC-01 (teclado), MOU-01 (mouse), CAM-01 (cámara).</p>
+<div class="meta"><strong id="resultado" aria-live="polite"></strong><span>MXN · IVA incluido · Envío por pedido</span></div>
+<table id="ofertas"><thead><tr><th>Proveedor</th><th>Producto</th><th>SKU</th><th>Precio unitario</th><th>Envío</th><th>Unidades disponibles</th></tr></thead><tbody></tbody></table><p id="empty" hidden>No hay ofertas para este producto.</p></section>
+</main><footer>Entorno de demostración. No realiza compras, no usa tiendas reales y no solicita datos personales. Los precios no son cotizaciones comerciales.</footer>
+<script>
+const catalogo = [
+ ['Nova','Monitor Claro 24 FHD','MON-24',2499,199,8],
+ ['Pixel','Monitor Claro 24 FHD','MON-24',2599,0,12],
+ ['Norte','Monitor Claro 24 FHD','MON-24',2399,249,5],
+ ['Central','Monitor Claro 24 FHD','MON-24',2299,0,0],
+ ['Órbita','Monitor Claro 24 FHD','MON-24',2699,99,9],
+ ['Prisma','Monitor Claro 24 FHD','MON-24',2549,129,6],
+ ['Nova','Teclado Claro USB','TEC-01',399,99,20],
+ ['Pixel','Teclado Claro USB','TEC-01',449,0,15],
+ ['Norte','Teclado Claro USB','TEC-01',379,149,30],
+ ['Nova','Mouse Claro inalámbrico','MOU-01',249,99,10],
+ ['Pixel','Mouse Claro inalámbrico','MOU-01',299,0,25],
+ ['Norte','Mouse Claro inalámbrico','MOU-01',279,49,12],
+ ['Nova','Cámara Claro FHD','CAM-01',599,0,0],
+ ['Pixel','Cámara Claro FHD','CAM-01',649,0,0]
+];
+function buscar(event){
+ if(event) event.preventDefault();
+ const sku=document.querySelector('#sku').value.trim().toUpperCase();
+ const ofertas=catalogo.filter(row=>row[2]===sku);
+ const tbody=document.querySelector('tbody');tbody.replaceChildren();
+ for(const oferta of ofertas){const tr=document.createElement('tr');
+ oferta.forEach((value,index)=>{const td=document.createElement('td');td.textContent=index===3||index===4?value.toFixed(2):String(value);td.className=['supplier','product','sku','price','shipping',value>0?'stock':'out'][index];tr.append(td)});tbody.append(tr)}
+ document.querySelector('#resultado').textContent=`${ofertas.length} ofertas · ${sku}`;
+ document.querySelector('#empty').hidden=ofertas.length!==0;
+ document.querySelector('#ofertas').dataset.sku=sku;
+}
+document.querySelector('#search-form').addEventListener('submit',buscar);buscar();
+</script></body></html>

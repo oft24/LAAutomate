@@ -58,16 +58,18 @@ class StepTrack(QWidget):
 
     def _crear_nodo(self, numero: int, fila: FilaEjecucion, indice_original: int) -> QPushButton:
         color = COLORES.musgo if fila.exito else COLORES.oxido
+        fondo = COLORES.musgo_suave if fila.exito else COLORES.oxido_suave
         boton = QPushButton(f"{numero:02d}")
-        boton.setFixedSize(38, 28)
+        boton.setFixedSize(38, 36)
         estado_texto = "Completado" if fila.exito else "Con error"
         boton.setToolTip(f"{fila.automatizacion} — {estado_texto}")
         boton.setCursor(Qt.CursorShape.PointingHandCursor)
         boton.setStyleSheet(
-            f"QPushButton {{ background-color: {color}; color: white; "
+            f"QPushButton {{ background-color: {fondo}; color: {color}; padding: 0; "
             f"font-family: {TIPO.familia_mono}; font-weight: 600; font-size: 11px; "
-            f"border: none; border-radius: 4px; }}"
-            f"QPushButton:hover {{ background-color: {color}; opacity: 0.85; }}"
+            f"border: 1px solid {color}; border-radius: 8px; }}"
+            f"QPushButton:hover {{ background-color: {color}; color: {COLORES.papel}; }}"
+            f"QPushButton:focus {{ border: 2px solid {COLORES.tinta}; }}"
         )
         boton.clicked.connect(lambda checked=False, i=indice_original: self.nodo_clickeado.emit(i))
         return boton

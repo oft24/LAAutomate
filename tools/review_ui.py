@@ -67,6 +67,8 @@ def main():
             app.processEvents()
             for indice, clave in enumerate(CLAVES):
                 ventana.sidebar.establecer_vista(clave)
+                if app.focusWidget() is not None:
+                    app.focusWidget().clearFocus()
                 from PySide6.QtTest import QTest
                 QTest.qWait(180)
                 if ventana._animacion_pagina is not None:
@@ -90,7 +92,19 @@ def main():
         QTest.qWait(300)
         app.processEvents()
         ventana.grab().save(str(salida / "1360-grabadora-menu-compacto.png"))
-        print("RENDERED", 17, "synthetic views", flush=True)
+        ventana.sidebar._alternar_colapso()
+        QTest.qWait(300)
+        ventana.sidebar.establecer_vista("asistente")
+        ventana.assistant_view._agregar_burbuja(
+            "model", "## Revisión del flujo\n\n**Borrador listo para revisar.**\n\n"
+            "1. Abrir la aplicación.\n2. Comprobar el destino.\n3. Validar el resultado.\n\n"
+            "```python\nresultado = AutomationResult(success=True)\n```\n\n"
+            "Este ejemplo es sintético; no se ha ejecutado ninguna automatización."
+        )
+        QTest.qWait(300)
+        app.processEvents()
+        ventana.grab().save(str(salida / "1360-asistente-respuesta.png"))
+        print("RENDERED", 18, "synthetic views", flush=True)
         print("LAYOUT", "OK" if not fallos else "; ".join(fallos), flush=True)
         print("OUTPUT", salida, flush=True)
         ventana.close()

@@ -17,6 +17,14 @@ core/rpa.db
 build/
 dist/
 
+# Artefactos de la demo de comparativos: solo se versiona la plantilla
+# ficticia de entrada; reportes, renders e inspecciones son locales.
+outputs/*
+!outputs/demo-compras/
+outputs/demo-compras/*
+!outputs/demo-compras/productos.xlsx
+se-metadata.json
+
 # Herramientas
 .pytest_cache/
 .mypy_cache/

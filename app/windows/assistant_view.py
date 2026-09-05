@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
 
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.page_header import PageHeader
+from app.widgets.code_editor import CodeEditor
+from app.widgets.chat_text import ChatText
 from app.widgets.python_highlighter import PythonHighlighter
 from core.config import BASE_DIR, LOGS_DIR, var
 from core.gemini_client import (
@@ -295,17 +297,7 @@ class _Burbuja(QFrame):
         etiqueta_rol.setObjectName("rolUsuario" if es_usuario else "rolIA")
         layout.addWidget(etiqueta_rol)
 
-        cuerpo = QPlainTextEdit(texto)
-        cuerpo.setReadOnly(True)
-        cuerpo.setFrameShape(QFrame.Shape.NoFrame)
-        cuerpo.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        cuerpo.setStyleSheet(
-            f"background: transparent; border: none; color: {COLORES.tinta};"
-            f" font-family: {TIPO.familia_mono if not es_usuario else TIPO.familia_ui};"
-            f" font-size: {TIPO.t_small if not es_usuario else TIPO.t_body}px; padding: 0;"
-        )
-        lineas = max(1, texto.count("\n") + 1, (len(texto) // 82) + 1)
-        cuerpo.setFixedHeight(min(380, max(62, lineas * 18 + 30)))
+        cuerpo = ChatText(texto, markdown=not es_usuario)
         layout.addWidget(cuerpo)
 
 
@@ -385,12 +377,13 @@ class AssistantView(QWidget):
         )
         self.entrada.setMaximumHeight(112)
         v.addWidget(self.entrada)
+        v.addWidget(self._etiqueta("Ctrl+V para pegar capturas · puedes agregar varias antes de enviar"))
 
         self.panel_resultado = QFrame()
         self.panel_resultado.setObjectName("tarjeta")
         resultado = QVBoxLayout(self.panel_resultado)
         resultado.addWidget(self._etiqueta("Resultado · revisa antes de crear"))
-        self.codigo_resultado = QPlainTextEdit(readOnly=True)
+        self.codigo_resultado = CodeEditor(readOnly=True)
         self.codigo_resultado.setObjectName("editorCodigo")
         self.codigo_resultado.setMaximumHeight(145)
         self._resaltador_resultado = PythonHighlighter(self.codigo_resultado.document())
@@ -479,16 +472,22 @@ class AssistantView(QWidget):
         self.combo_automatizacion = QComboBox()
         v.addWidget(self.combo_automatizacion)
 
-        nota = QLabel(
+        detalle_contexto = (
             "Siempre se incluyen arquitectura, acciones y lógica de la grabadora. "
             "El log solo se agrega al preparar un diagnóstico; revisa el mensaje y las capturas antes de enviarlos. No se lee .env ni la Bóveda como contexto."
         )
+        nota = QLabel("Contexto del proyecto incluido · sin claves ni bóveda")
+        nota.setToolTip(detalle_contexto)
         nota.setObjectName("tarjetaDescripcion")
         nota.setWordWrap(True)
         v.addWidget(nota)
 
         v.addSpacing(ESPACIADO.sm)
         v.addWidget(self._etiqueta("Capturas de este turno"))
+        boton_adjuntar = QPushButton("Adjuntar capturas")
+        self.boton_adjuntar = boton_adjuntar
+        boton_adjuntar.clicked.connect(self._adjuntar_capturas)
+        v.addWidget(boton_adjuntar)
         self.lista_capturas = QListWidget()
         self.lista_capturas.setIconSize(QSize(64, 44))
         self.lista_capturas.setMaximumHeight(135)
@@ -496,22 +495,21 @@ class AssistantView(QWidget):
         self.resumen_capturas = QLabel("Sin capturas. Puedes describir el flujo solo con texto.")
         self.resumen_capturas.setWordWrap(True)
         v.addWidget(self.resumen_capturas)
-        boton_adjuntar = QPushButton("Adjuntar capturas")
-        self.boton_adjuntar = boton_adjuntar
-        boton_adjuntar.clicked.connect(self._adjuntar_capturas)
-        v.addWidget(boton_adjuntar)
-        boton_limpiar = QPushButton("Limpiar capturas")
+        fila_capturas = QHBoxLayout()
+        boton_limpiar = QPushButton("Limpiar todas")
         self.boton_limpiar = boton_limpiar
         boton_limpiar.setEnabled(False)
         boton_limpiar.clicked.connect(self._limpiar_capturas)
-        v.addWidget(boton_limpiar)
-        self.boton_quitar = QPushButton("Quitar seleccionada")
+        fila_capturas.addWidget(boton_limpiar)
+        self.boton_quitar = QPushButton("Quitar")
+        self.boton_quitar.setToolTip("Quitar la captura seleccionada")
         self.boton_quitar.setEnabled(False)
         self.boton_quitar.clicked.connect(self._quitar_captura)
         self.lista_capturas.currentRowChanged.connect(
             lambda fila: self.boton_quitar.setEnabled(fila >= 0 and self._worker is None)
         )
-        v.addWidget(self.boton_quitar)
+        fila_capturas.addWidget(self.boton_quitar)
+        v.addLayout(fila_capturas)
         v.addStretch()
 
         privacidad = QLabel("Las imágenes solo salen del equipo al presionar “Generar con Gemini”.")
@@ -558,11 +556,11 @@ class AssistantView(QWidget):
 
     def _agregar_sugerencias(self) -> None:
         fila = QWidget()
-        layout = QVBoxLayout(fila)
+        layout = QHBoxLayout(fila)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ESPACIADO.sm)
         sugerencias = (
-            ("Crear desde capturas", "Analiza las capturas adjuntas y crea una automatización completa para este flujo:"),
+            ("Desde capturas", "Analiza las capturas adjuntas y crea una automatización completa para este flujo:"),
             ("Mejorar un flujo", "Revisa la automatización seleccionada y propón una versión más robusta que:"),
             ("Explicar un error", "Ayúdame a diagnosticar este error y después propón el cambio mínimo seguro:"),
         )

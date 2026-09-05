@@ -21,12 +21,13 @@ class EmptyState(QWidget):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         layout.setSpacing(ESPACIADO.sm)
-        layout.setContentsMargins(ESPACIADO.xxxl, ESPACIADO.xxxl, ESPACIADO.xxxl, ESPACIADO.xxxl)
+        layout.setContentsMargins(ESPACIADO.lg, ESPACIADO.lg, ESPACIADO.lg, ESPACIADO.lg)
 
         titulo_lbl = QLabel(titulo)
         titulo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        titulo_lbl.setWordWrap(True)
         titulo_lbl.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORES.tinta};")
         layout.addWidget(titulo_lbl)
 
@@ -34,8 +35,7 @@ class EmptyState(QWidget):
         desc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_lbl.setWordWrap(True)
         desc_lbl.setStyleSheet(f"color: {COLORES.grafito}; font-size: 13px;")
-        desc_lbl.setMaximumWidth(420)
-        layout.addWidget(desc_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(desc_lbl)
 
         if texto_boton and on_click:
             boton = QPushButton(texto_boton)

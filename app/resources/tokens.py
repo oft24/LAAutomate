@@ -130,8 +130,8 @@ QWidget#sidebar {{
     border-right: 1px solid {c.borde};
 }}
 QLabel#marcaIcono {{
-    background-color: {c.acento_suave};
-    border: 1px solid {c.acento};
+    background-color: {c.papel_hondo};
+    border: 1px solid {c.borde_fuerte};
     border-radius: 7px;
 }}
 QLabel#sidebarMarca {{
@@ -316,6 +316,17 @@ QPushButton#peligro:pressed {{
 }}
 QPushButton#peligro:hover {{
     background-color: {c.oxido_suave};
+}}
+QPushButton#peligro:disabled {{
+    background-color: {c.tarjeta};
+    border-color: {c.borde};
+    color: {c.grafito_claro};
+}}
+QDialog {{
+    background-color: {c.papel};
+}}
+QPushButton:focus, QPushButton#primario:focus, QPushButton#peligro:focus {{
+    border-color: {c.cian};
 }}
 QPushButton#modoToggle {{
     background-color: transparent;
@@ -603,7 +614,10 @@ QSplitter::handle {{
     background-color: {c.borde};
 }}
 QSplitter::handle:horizontal {{
-    width: 1px;
+    width: 5px;
+}}
+QSplitter::handle:hover {{
+    background-color: {c.borde_fuerte};
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;

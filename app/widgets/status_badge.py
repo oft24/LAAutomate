@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
 from app.resources.tokens import COLORES, ESPACIADO
 
@@ -17,9 +17,10 @@ ESTADOS = {
 }
 
 
-class StatusBadge(QWidget):
+class StatusBadge(QFrame):
     def __init__(self, estado: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("statusBadge")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(ESPACIADO.sm, 2, ESPACIADO.sm, 2)
         layout.setSpacing(6)
@@ -35,7 +36,7 @@ class StatusBadge(QWidget):
         self._texto.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 12px; background: transparent;")
         layout.addWidget(self._texto)
 
-        self.setStyleSheet(f"background-color: {color_suave}; border-radius: 10px;")
+        self.setStyleSheet(f"QFrame#statusBadge {{ background-color: {color_suave}; border-radius: 10px; }}")
         self.setFixedHeight(22)
 
     @staticmethod

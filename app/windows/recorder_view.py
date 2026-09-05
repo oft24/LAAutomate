@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from app.resources.tokens import COLORES, ESPACIADO
 from app.widgets.grabacion import EstadoGrabacion, PasosGrabados
 from app.widgets.page_header import PageHeader
+from app.widgets.code_editor import CodeEditor
 from app.widgets.python_highlighter import PythonHighlighter
 from app.widgets.toast import mostrar_toast
 from core.config import LOGS_DIR
@@ -494,7 +495,7 @@ class RecorderView(QWidget):
         cabecera_codigo.addWidget(self._subtitulo("Código generado"))
         cabecera_codigo.addStretch()
         columna_codigo.addLayout(cabecera_codigo)
-        self.vista_codigo = QPlainTextEdit()
+        self.vista_codigo = CodeEditor()
         self.vista_codigo.setReadOnly(True)
         self.vista_codigo.setObjectName("editorCodigo")
         self._resaltador_codigo = PythonHighlighter(self.vista_codigo.document())

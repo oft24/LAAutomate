@@ -79,6 +79,8 @@ class VaultView(QWidget):
         v.addWidget(nota)
 
         formulario = QFormLayout()
+        formulario.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        formulario.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         formulario.setSpacing(ESPACIADO.sm)
         self.campo_nombre = QLineEdit()
         self.campo_nombre.setPlaceholderText("nombre_de_la_automatización")

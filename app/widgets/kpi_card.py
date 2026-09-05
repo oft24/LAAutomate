@@ -35,11 +35,13 @@ class KpiCard(QFrame):
         acento = QFrame()
         self._acento = acento
         acento.setFixedHeight(3)
+        acento.setFixedWidth(32)
         acento.setStyleSheet(f"background-color: {self._tono}; border-radius: 1px;")
         layout.addWidget(acento)
 
         self._etiqueta = QLabel(etiqueta)
         self._etiqueta.setObjectName("kpiEtiqueta")
+        self._etiqueta.setWordWrap(True)
         layout.addWidget(self._etiqueta)
 
         fila_valor = QVBoxLayout()

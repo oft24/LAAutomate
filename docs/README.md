@@ -1,63 +1,114 @@
-# Documentación de LaAutomate
+---
+tags: [laautomate, indice, moc]
+alias: ["Mapa de LaAutomate", "Índice de documentación"]
+---
 
-Índice de `docs/`. Cada documento tiene un propósito y un momento en el que
-conviene leerlo; esta página dice cuál es cuál para no tener que abrirlos todos.
+# Mapa de LaAutomate
+
+> [!info] Cómo leer esto
+> Esta es la puerta de entrada. Cada nota se explica sola y enlaza con las
+> demás. Si abres esta carpeta en **Obsidian**, la vista de grafo muestra
+> cómo encaja todo y los enlaces entre notas son navegables.
+
+**LaAutomate** es una plataforma de escritorio para escribir automatizaciones
+(RPA) **en código Python**, no en un diseñador visual. Programa, ejecuta,
+registra y —cuando algo falla— se repara sola con ayuda de un modelo.
+
+---
 
 ## Por dónde empezar
 
-Elige la fila que describe lo que quieres hacer y sigue esa ruta en orden.
+Elige la fila que describe lo que quieres hacer.
 
 | Quiero… | Ruta |
 |---|---|
-| **Escribir mi primera automatización** | [`escribir-automatizaciones.md`](escribir-automatizaciones.md) → [`acciones.md`](acciones.md) |
-| **Saber qué puede hacer `self.web`, `self.escritorio`…** | [`acciones.md`](acciones.md) |
-| **Grabar un proceso en vez de escribirlo** | [`escribir-automatizaciones.md` § La grabadora](escribir-automatizaciones.md#la-grabadora) → [`logica-grabadora.md`](logica-grabadora.md) |
-| **Crear código desde una descripción y capturas** | [`asistente-ia.md`](asistente-ia.md) → [`acciones.md`](acciones.md) |
-| **Entender cómo encaja todo por dentro** | [`arquitectura.md`](arquitectura.md) → [`logica-grabadora.md`](logica-grabadora.md) |
-| **Tocar el código del proyecto** | [`arquitectura.md`](arquitectura.md) → [`desarrollo.md`](desarrollo.md) |
-| **Entregar la app a alguien más** | [`empaquetado.md`](empaquetado.md) |
+| **Todo el proyecto en un solo archivo** | [[CONTEXTO-COMPLETO]] |
+| **Entender qué es esto en 5 minutos** | [[vision-general]] |
+| **Escribir mi primera automatización** | [[escribir-automatizaciones]] -> [[acciones]] |
+| **Saber qué puedo llamar** (`self.web`, `self.escritorio`…) | [[acciones]] |
+| **Grabar un proceso en vez de escribirlo** | [[logica-grabadora]] |
+| **Que la IA lo escriba por mí** | [[asistente-ia]] |
+| **Entender cómo se repara sola** | [[autocorreccion]] |
+| **Ver los errores ya aprendidos** | [[PRACTICAS]] |
+| **Entender el sistema por dentro** | [[arquitectura]] |
+| **Tocar el código** | [[arquitectura]] -> [[desarrollo]] |
+| **Entregar la app a alguien** | [[empaquetado]] |
 
-## Los documentos
+---
 
-Ordenados de "para usar" a "para mantener".
+## Las notas, por tema
 
-### Uso
+### Para usar
 
-| Documento | Qué responde |
+| Nota | Qué responde |
 |---|---|
-| [Escribir automatizaciones](escribir-automatizaciones.md) | La clase base, los disparadores, credenciales, la grabadora, errores comunes. |
-| [Referencia de acciones](acciones.md) | Todos los métodos de `self.web`, `.excel`, `.http`, `.correo`, `.escritorio`, `.copiloto`. Incluye pestañas del navegador y control de varias apps. |
+| [[CONTEXTO-COMPLETO]] | El proyecto entero en un archivo: lo pedido, lo hecho, cada botón, lo que falta. Punto de extracción de contexto |
+| [[vision-general]] | Qué es LaAutomate, para quién, y qué **no** es |
+| [[escribir-automatizaciones]] | La clase base, disparadores, credenciales, errores comunes |
+| [[acciones]] | Todos los métodos de `self.web`, `.escritorio`, `.excel`, `.http`, `.correo`, `.copiloto` |
+| [[logica-grabadora]] | Grabar clics y teclas, y convertirlos en código |
 
-### Cómo funciona por dentro
+### La parte de IA
 
-| Documento | Qué responde |
+| Nota | Qué responde |
 |---|---|
-| [Autocorrección](autocorreccion.md) | Qué pasa cuando una automatización falla: bitácora, capturas por intento, los 5 reintentos y cómo aprende. |
-| [Prácticas aprendidas](PRACTICAS.md) | La memoria del autocorrector; se inyecta en cada reparación. |
-| [Arquitectura](arquitectura.md) | Cómo encajan registry, runner, scheduler, acciones y core. Dónde vive cada dato. |
-| [Lógica de la Grabadora](logica-grabadora.md) | Flujo Web/Escritorio, máquina de estados, cómo se decide qué se graba y qué no, y las limitaciones conocidas. |
-| [Asistente IA con Gemini](asistente-ia.md) | Qué contexto se envía, cómo se protege la API key y cómo una respuesta se convierte en borrador revisable. |
+| [[asistente-ia]] | El chat: qué se le manda, cómo elige modelo, qué valida antes de guardar |
+| [[autocorreccion]] | Qué pasa cuando algo falla: bitácora, capturas, 5 reintentos |
+| [[prompts]] | Cómo están construidos los prompts y por qué |
+| [[PRACTICAS]] | La memoria del sistema: errores reales y la regla que dejaron |
+| [[PROMPT_CHANGELOG]] | Historial de versiones del prompt de reparación. Lo genera el optimizador: no existe hasta la primera mejora |
 
-### Mantenimiento
+### Por dentro
 
-| Documento | Qué responde |
+| Nota | Qué responde |
 |---|---|
-| [Desarrollo](desarrollo.md) | Estructura del repo, cómo correr las pruebas, convenciones, deuda conocida. |
-| [Empaquetado e instalación](empaquetado.md) | Generar el `.exe` y el instalador, y cómo cambian las rutas al empaquetar. |
-| [Prompt del sistema de Gemini](GEMINI_SYSTEM_PROMPT.md) | Contrato versionado que limita cómo el modelo puede proponer automatizaciones. |
+| [[arquitectura]] | Cómo encajan registry, runner, scheduler, acciones y core |
+| [[desarrollo]] | Estructura del repo, pruebas, convenciones, deuda conocida |
+| [[empaquetado]] | Generar el `.exe` y el instalador |
 
 ### Histórico
 
-| Documento | Qué responde |
+| Nota | Qué responde |
 |---|---|
-| [Prompt original](CODEX_PROMPT.md) | La especificación con la que nació el proyecto. No describe el estado actual. |
+| [[CODEX_PROMPT]] | La especificación con la que nació el proyecto. **No** describe el estado actual |
 
-## Convenciones de estos documentos
+---
 
-- **El código y sus pruebas son la fuente de verdad.** Si un documento y el
-  código no coinciden, el documento está desactualizado — no al revés.
-- Cada documento explica **por qué** una decisión es como es cuando la razón no
-  es obvia, normalmente citando el caso real que la motivó. Esa es la parte que
-  no se puede reconstruir leyendo el código.
-- Las limitaciones conocidas se escriben, no se omiten: viven en la sección
-  correspondiente del documento y en [Deuda conocida](desarrollo.md#deuda-conocida).
+## Cómo se relacionan
+
+```
+                    vision-general
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+escribir-…      logica-grabadora   asistente-ia
+        │                   │                   │
+        └─────────► acciones ◄──────────────┘
+                            │
+                            ▼
+                     arquitectura
+                            │
+              ┌─────────────┴─────────────┐
+              ▼                           ▼
+      autocorreccion            desarrollo
+              │                           │
+       ┌──────┴──────┐                    ▼
+       ▼             ▼             empaquetado
+ PRACTICAS  prompts
+```
+
+---
+
+## Convenciones de estas notas
+
+> [!warning] El código manda
+> Si una nota y el código no coinciden, **la nota está desactualizada** — no
+> al revés. Las pruebas son la fuente de verdad ejecutable.
+
+- Cada nota explica **por qué** una decisión es como es cuando la razón no es
+  obvia, citando el caso real que la motivó. Esa es la parte que no se puede
+  reconstruir leyendo el código.
+- Las limitaciones se **escriben**, no se omiten. Viven en su nota y en
+  [[desarrollo#Deuda conocida]].
+- Los números que aparecen (tiempos, tamaños, porcentajes) están **medidos**.
+  Si algo es una estimación, lo dice.

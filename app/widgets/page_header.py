@@ -31,10 +31,10 @@ class PageHeader(QWidget):
         columna_texto.addWidget(titulo_lbl)
         subtitulo_lbl = QLabel(subtitulo)
         subtitulo_lbl.setObjectName("pageSubtitle")
+        subtitulo_lbl.setWordWrap(True)
+        subtitulo_lbl.setMinimumWidth(0)
         columna_texto.addWidget(subtitulo_lbl)
-        layout.addLayout(columna_texto)
-
-        layout.addStretch()
+        layout.addLayout(columna_texto, stretch=1)
 
         self.botones: dict[str, QPushButton] = {}
         for i, (etiqueta, callback) in enumerate(acciones or []):

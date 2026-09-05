@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from PySide6.QtCore import Qt
 
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.empty_state import EmptyState
 from app.widgets.page_header import PageHeader
+from app.widgets.code_editor import CodeEditor
 from app.widgets.python_highlighter import PythonHighlighter
 from app.workers import AutomationWorker
 from core.gemini_client import tiene_api_key
@@ -76,6 +78,8 @@ class AutomationsView(QWidget):
         self._contenedor_lista.setMaximumWidth(260)
         self._pila_lista = QStackedLayout(self._contenedor_lista)
         self.lista = QListWidget()
+        self.lista.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.lista.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.lista.currentRowChanged.connect(self._cargar_codigo)
         self._vacio_lista = EmptyState(
             "Sin automatizaciones todavía",
@@ -93,7 +97,7 @@ class AutomationsView(QWidget):
         self.info_boveda = QLabel("")
         self.info_boveda.setWordWrap(True)
         columna_editor.addWidget(self.info_boveda)
-        self.editor = QPlainTextEdit()
+        self.editor = CodeEditor()
         self.editor.setObjectName("editorCodigo")
         self.editor.setPlaceholderText("Selecciona una automatización de la lista para ver y editar su código aquí.")
         self.editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -219,7 +223,10 @@ class AutomationsView(QWidget):
         self.lista.clear()
         indice_a_seleccionar = 0
         for i, spec in enumerate(especificaciones):
-            self.lista.addItem(f"{spec.nombre}  ·  {spec.categoria}  ·  {spec.disparador}")
+            self.lista.addItem(spec.nombre)
+            self.lista.item(self.lista.count() - 1).setToolTip(
+                f"{spec.nombre}\nCategoría: {spec.categoria}\nDisparador: {spec.disparador}"
+            )
             if seleccionar and spec.nombre == seleccionar:
                 indice_a_seleccionar = i
         if self.lista.count():

@@ -43,7 +43,7 @@ class SchedulerView(QWidget):
         layout.addWidget(ayuda)
         editar = QPushButton("Editar disparador en Automatizaciones")
         editar.clicked.connect(self._editar_disparador)
-        layout.addWidget(editar)
+        layout.addWidget(editar, alignment=Qt.AlignmentFlag.AlignLeft)
 
         fila_kpis = QHBoxLayout()
         fila_kpis.setSpacing(ESPACIADO.lg)

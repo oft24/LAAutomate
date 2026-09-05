@@ -246,7 +246,7 @@ class WikiView(QWidget):
 
     @staticmethod
     def _estilo_descripcion() -> str:
-        return f"color: {COLORES.tinta}; font-size: {TIPO.t_caption}px;"
+        return f"color: {COLORES.tinta}; font-size: {TIPO.t_body}px;"
 
     def _construir_tarjeta_parrafos(self, titulo: str, parrafos: list[str]) -> QFrame:
         tarjeta = QFrame()
