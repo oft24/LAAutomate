@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.i18n import QLineEdit
+from app.i18n import QLabel
 
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.page_header import PageHeader

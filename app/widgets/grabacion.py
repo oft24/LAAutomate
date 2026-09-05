@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.i18n import QLabel
 
 from app.resources.tokens import COLORES, ESPACIADO, RADIOS, TIPO
 

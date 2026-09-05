@@ -39,7 +39,7 @@ pytest -m "not network and not navegador"   # sin navegador de ningún tipo
 pytest tests/test_runner_failure.py -v
 ```
 
-~190 pruebas. Casi todas corren con el escritorio y el navegador **mockeados**: no
+La suite actual reúne 494 pruebas recopiladas. Casi todas corren con el escritorio y el navegador **mockeados**: no
 abren ventanas, no mueven el mouse y no tocan Outlook. Dos marcadores acotan las
 que sí necesitan algo del entorno (ambos declarados en `pytest.ini`):
 

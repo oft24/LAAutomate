@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.i18n import QLineEdit, QPlainTextEdit
+from app.i18n import QLabel
 
 from app.resources.tokens import COLORES, ESPACIADO
 from app.widgets.empty_state import EmptyState

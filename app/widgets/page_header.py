@@ -3,6 +3,7 @@ primarias a la derecha. Ninguna vista debe mostrar un titulo flotando solo."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from app.i18n import QLabel, QPushButton
 
 from app.resources.tokens import ESPACIADO
 

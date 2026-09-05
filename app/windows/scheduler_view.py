@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.i18n import QTableWidget
+from app.i18n import QLabel, QPushButton
 
 from app.resources.tokens import DENSIDAD, ESPACIADO
 from app.widgets.empty_state import EmptyState

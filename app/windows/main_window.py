@@ -12,6 +12,8 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
+    QComboBox,
+    QVBoxLayout,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.resources.tokens import construir_qss
+from app.i18n import language, QLabel
 from core.config import DESCRIPCION_APP, NOMBRE_APP
 
 _RUTA_ICONO = Path(__file__).resolve().parent.parent / "resources" / "app_icon.ico"
@@ -37,6 +40,7 @@ from app.windows.wiki_view import WikiView
 class MainWindow(QMainWindow):
     def __init__(self, scheduler, runner) -> None:
         super().__init__()
+        language.restore()
         self.setWindowTitle(f"{NOMBRE_APP} - {DESCRIPCION_APP}")
         self.resize(1360, 860)
         # Por debajo de esto el panel de contexto del Asistente se recorta
@@ -82,7 +86,23 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.sidebar)
-        layout.addWidget(self.paginas, stretch=1)
+        contenido = QVBoxLayout()
+        contenido.setSpacing(0)
+        barra = QHBoxLayout()
+        barra.setContentsMargins(24, 8, 24, 0)
+        barra.addStretch()
+        barra.addWidget(QLabel("Idioma"))
+        self.selector_idioma = QComboBox()
+        self.selector_idioma.addItem("Español", "es")
+        self.selector_idioma.addItem("English", "en")
+        self.selector_idioma.setCurrentIndex(self.selector_idioma.findData(language.code))
+        self.selector_idioma.setMinimumWidth(130)
+        self.selector_idioma.currentIndexChanged.connect(
+            lambda: language.set(self.selector_idioma.currentData()))
+        barra.addWidget(self.selector_idioma)
+        contenido.addLayout(barra)
+        contenido.addWidget(self.paginas, stretch=1)
+        layout.addLayout(contenido, stretch=1)
         self.setCentralWidget(contenedor)
 
     def showEvent(self, event) -> None:

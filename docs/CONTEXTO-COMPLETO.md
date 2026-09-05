@@ -16,9 +16,11 @@ actualizado: 2026-09-05
 > [[README]]. Este archivo es el resumen ejecutable, no un sustituto del
 > código: **si algo aquí no coincide con el código, el código manda.**
 
-**Revisado el 5 de septiembre de 2026** · 419 pruebas pasaron en la corrida
-final; 12 de red/navegador excluidas. Evidencias, alcance y límites en
-[[REVISION-UX-2026-09-05]].
+**Revisado el 5 de septiembre de 2026** · 494 pruebas recopiladas. La corrida
+amplia sin red dejó 476 aprobadas, 1 omitida, 10 fallos y 6 errores dependientes
+del entorno (drivers de navegador y Credential Manager de Windows); la guía
+pública separa esas integraciones de las validaciones deterministas. Evidencias,
+alcance y límites en [[REVISION-UX-2026-09-05]].
 
 ---
 

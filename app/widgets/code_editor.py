@@ -2,6 +2,7 @@
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QTextFormat
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
+from app.i18n import QPlainTextEdit
 
 from app.resources.tokens import COLORES
 

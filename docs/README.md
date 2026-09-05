@@ -53,7 +53,7 @@ Elige la fila que describe lo que quieres hacer.
 | Nota | Qué responde |
 |---|---|
 | [[asistente-ia]] | El chat: qué se le manda, cómo elige modelo, qué valida antes de guardar |
-| [[autocorreccion]] | Qué pasa cuando algo falla: bitácora, capturas, 5 reintentos |
+| [[autocorreccion]] | Qué pasa cuando algo falla: bitácora, capturas y hasta 3 intentos |
 | [[prompts]] | Cómo están construidos los prompts y por qué |
 | [[PRACTICAS]] | La memoria del sistema: errores reales y la regla que dejaron |
 | [[PROMPT_CHANGELOG]] | Historial de versiones del prompt de reparación. Lo genera el optimizador: no existe hasta la primera mejora |

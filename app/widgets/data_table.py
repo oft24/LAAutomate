@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.i18n import QTableWidget
+from app.i18n import QLabel, QPushButton, QToolButton
 
 from app.resources.iconos import icono
 from app.resources.tokens import COLORES, DENSIDAD, ESPACIADO

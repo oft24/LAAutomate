@@ -10,13 +10,9 @@ echo [1/3] Compilando con PyInstaller...
 ".venv\Scripts\python.exe" -m PyInstaller LaAutomate.spec --noconfirm || exit /b 1
 
 echo [2/3] Copiando archivos auxiliares...
-copy /y README.md dist\LaAutomate\ >nul
-copy /y .env.example dist\LaAutomate\ >nul
-REM /EXCLUDE deja fuera los __pycache__: son bytecode del interprete de
-REM desarrollo, no sirven en la instalacion y solo ocupan sitio.
-xcopy automations dist\LaAutomate\automations\ /E /I /Q /Y /EXCLUDE:instalador\excluir.txt >nul
-copy /y instalador\INSTALL.bat dist\LaAutomate\ >nul
-copy /y instalador\UNINSTALL.bat dist\LaAutomate\ >nul
+REM Solo entran archivos versionados. Esto evita publicar por accidente
+REM automatizaciones creadas localmente, reportes, capturas o datos privados.
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\copiar_paquete_publico.ps1 -Destino dist\LaAutomate || exit /b 1
 
 echo [3/3] Listo. Para instalar:
 echo    dist\LaAutomate\INSTALL.bat

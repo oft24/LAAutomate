@@ -11,10 +11,11 @@ from uuid import uuid4
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, QSize, QTemporaryDir
-from PySide6.QtGui import QIcon, QPixmap, QImage
+from PySide6.QtGui import QIcon, QPixmap, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -32,6 +33,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.i18n import QLineEdit, QPlainTextEdit
+from app.i18n import QLabel, QPushButton, language, translate
 
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.page_header import PageHeader
@@ -63,6 +66,13 @@ _NOMBRE_SEGURO = re.compile(r"[^a-z0-9_]+")
 
 class _EntradaChat(QPlainTextEdit):
     imagenPegada = Signal(QImage)
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self.copy()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def insertFromMimeData(self, fuente):
         if self.isReadOnly():
@@ -280,8 +290,48 @@ class _GeminiWorker(QThread):
         self.listo.emit(respuesta)
 
 
+class _SondeoWorker(QThread):
+    listo = Signal(object)
+    error = Signal(str)
+    progreso = Signal(str)
+
+    def __init__(self, modelo: str) -> None:
+        super().__init__()
+        self.modelo = modelo
+        self.cancelado = threading.Event()
+        self.excluidos = set()
+
+    def cancelar(self):
+        self.cancelado.set()
+
+    def run(self) -> None:
+        # Comparte orden, límite y clasificación de errores con la reparación.
+        # Solo invoca consultas: nunca ejecuta el ciclo de autocorrección.
+        from engine.autocorreccion import Autocorrector
+        corrector = Autocorrector(None, modelo=self.modelo, cancelado=self.cancelado.is_set)
+        limite = time.monotonic() + 90
+        try:
+            modelos = corrector._consulta_acotada(corrector._modelos_a_probar, limite)
+            modelos = [modelo for modelo in modelos if modelo not in self.excluidos]
+            for puesto, modelo in enumerate(modelos, 1):
+                self.progreso.emit(f"Sondeo {puesto}/{len(modelos)} · {modelo} · capacidad estimada. Máximo 90 s en total.")
+                try:
+                    cliente = GeminiClient(modelo=modelo, reintentos=0)
+                    corrector._consulta_acotada(cliente.comprobar_disponibilidad, limite)
+                except Exception as exc:
+                    if not corrector._es_saturacion(exc):
+                        raise
+                    self.progreso.emit(f"{modelo} no respondió disponible; probando la siguiente alternativa…")
+                    continue
+                self.listo.emit(modelo)
+                return
+            self.error.emit("Ninguno de los modelos sondeados respondió disponible. Puedes intentarlo más tarde.")
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class _Burbuja(QFrame):
-    def __init__(self, rol: str, texto: str) -> None:
+    def __init__(self, rol: str, texto: str, *, traducible: bool = False) -> None:
         super().__init__()
         es_usuario = rol == "user"
         self.setObjectName("burbujaUsuario" if es_usuario else "burbujaIA")
@@ -295,10 +345,107 @@ class _Burbuja(QFrame):
 
         etiqueta_rol = QLabel("TÚ" if es_usuario else "LA  /  GEMINI")
         etiqueta_rol.setObjectName("rolUsuario" if es_usuario else "rolIA")
-        layout.addWidget(etiqueta_rol)
+        encabezado = QHBoxLayout()
+        encabezado.addWidget(etiqueta_rol)
+        encabezado.addStretch()
+        self.boton_copiar_mensaje = QPushButton("Copiar mensaje")
+        self.boton_copiar_mensaje.setToolTip("Copia el mensaje completo al portapapeles.")
+        self.boton_copiar_mensaje.clicked.connect(
+            lambda: QApplication.clipboard().setText(
+                translate(self._texto_original) if traducible else self._texto_original
+            )
+        )
+        encabezado.addWidget(self.boton_copiar_mensaje)
+        layout.addLayout(encabezado)
 
-        cuerpo = ChatText(texto, markdown=not es_usuario)
-        layout.addWidget(cuerpo)
+        self._texto_original = texto
+        self._cuerpo = ChatText(translate(texto) if traducible else texto, markdown=not es_usuario)
+        layout.addWidget(self._cuerpo)
+        if traducible:
+            language.changed.connect(
+                lambda: self._cuerpo.setMarkdown(translate(self._texto_original))
+            )
+
+
+class _CrearAutomatizacionDialog(QDialog):
+    """Confirmación integrada al diseño, con nombre visible y validado."""
+
+    def __init__(self, sugerido: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(translate("Crear automatización"))
+        self.setModal(True)
+        self.setMinimumWidth(470)
+        self.setObjectName("crearAutomatizacionDialog")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(ESPACIADO.xl, ESPACIADO.xl, ESPACIADO.xl, ESPACIADO.xl)
+        layout.setSpacing(ESPACIADO.md)
+
+        cabecera = QFrame()
+        cabecera.setObjectName("dialogHero")
+        cabecera_layout = QVBoxLayout(cabecera)
+        cabecera_layout.setContentsMargins(ESPACIADO.lg, ESPACIADO.lg, ESPACIADO.lg, ESPACIADO.lg)
+        titulo = QLabel("Nueva automatización")
+        titulo.setObjectName("dialogTitle")
+        cabecera_layout.addWidget(titulo)
+        descripcion = QLabel(
+            "Confirma un nombre fácil de reconocer. El código quedará visible para revisarlo antes de ejecutarlo."
+        )
+        descripcion.setObjectName("dialogHint")
+        descripcion.setWordWrap(True)
+        cabecera_layout.addWidget(descripcion)
+        layout.addWidget(cabecera)
+
+        etiqueta = QLabel("Nombre del flujo")
+        etiqueta.setObjectName("subtituloSeccion")
+        layout.addWidget(etiqueta)
+        self.campo_nombre = QLineEdit()
+        self.campo_nombre.setPlaceholderText("ejemplo: reporte_diario")
+        self.campo_nombre.setText(sugerido)
+        self.campo_nombre.selectAll()
+        layout.addWidget(self.campo_nombre)
+
+        self.vista_nombre = QLabel()
+        self.vista_nombre.setObjectName("dialogPreview")
+        self.vista_nombre.setWordWrap(True)
+        layout.addWidget(self.vista_nombre)
+        self.error_nombre = QLabel()
+        self.error_nombre.setObjectName("dialogError")
+        self.error_nombre.setWordWrap(True)
+        layout.addWidget(self.error_nombre)
+
+        botones = QHBoxLayout()
+        botones.addStretch()
+        cancelar = QPushButton("Cancelar")
+        cancelar.clicked.connect(self.reject)
+        botones.addWidget(cancelar)
+        self.boton_confirmar = QPushButton("Crear automatización")
+        self.boton_confirmar.setObjectName("primario")
+        self.boton_confirmar.setMinimumWidth(170)
+        self.boton_confirmar.setDefault(True)
+        self.boton_confirmar.clicked.connect(self.accept)
+        botones.addWidget(self.boton_confirmar)
+        layout.addLayout(botones)
+
+        self.campo_nombre.textChanged.connect(self._validar_nombre)
+        self._validar_nombre()
+
+    def nombre_normalizado(self) -> str:
+        return normalizar_nombre(self.campo_nombre.text())
+
+    def _validar_nombre(self) -> None:
+        original = self.campo_nombre.text().strip()
+        nombre = self.nombre_normalizado() if original else ""
+        self.vista_nombre.setText(
+            f"Se guardará como:  automations/{nombre}/" if nombre else "Escribe un nombre para continuar."
+        )
+        existe = bool(nombre) and (BASE_DIR / "automations" / nombre).exists()
+        if existe:
+            self.error_nombre.setText("Ya existe una automatización con ese nombre. No se sobrescribirá.")
+        else:
+            self.error_nombre.setText("")
+        self.error_nombre.setVisible(existe)
+        self.boton_confirmar.setEnabled(bool(nombre) and not existe)
 
 
 class AssistantView(QWidget):
@@ -308,6 +455,9 @@ class AssistantView(QWidget):
         self._historial: list[tuple[str, str]] = []
         self._capturas: list[Path] = []
         self._ultima_respuesta = ""
+        self._modelos_fallidos = {}
+        self._modelo_sondeado = None
+        self._continuar_sondeo = False
         self._worker: _GeminiWorker | None = None
         self._worker_modelos: _ModelosWorker | None = None
         self._rotas: dict[str, str] = {}
@@ -336,16 +486,23 @@ class AssistantView(QWidget):
         self._timer_pensando = QTimer(self)
         self._timer_pensando.setInterval(350)
         self._timer_pensando.timeout.connect(self._animar_estado)
+        self._timer_feedback_creacion = QTimer(self)
+        self._timer_feedback_creacion.setSingleShot(True)
+        self._timer_feedback_creacion.timeout.connect(
+            lambda: self.boton_crear.setText("Crear automatización")
+        )
 
         self._agregar_burbuja(
             "model",
             "Cuéntame qué quieres automatizar. Puedo usar capturas, la referencia real de acciones "
             "y el código de una automatización existente como contexto. No guardaré ni ejecutaré "
             "nada sin tu confirmación.",
+            traducible=True,
         )
         self._agregar_sugerencias()
         self.refrescar_contexto()
         self._actualizar_estado_clave()
+        language.changed.connect(self._al_cambiar_idioma)
 
     def _construir_chat(self) -> QWidget:
         panel = QWidget()
@@ -394,6 +551,8 @@ class AssistantView(QWidget):
         self.boton_copiar.clicked.connect(self._copiar_codigo)
         fila_resultado.addWidget(self.boton_copiar)
         self.boton_crear = QPushButton("Crear automatización")
+        self.boton_crear.setObjectName("primario")
+        self.boton_crear.setMinimumWidth(170)
         self.boton_crear.setEnabled(False)
         self.boton_crear.clicked.connect(self._crear_automatizacion)
         fila_resultado.addWidget(self.boton_crear)
@@ -407,12 +566,31 @@ class AssistantView(QWidget):
         self.estado.setWordWrap(True)
         v.addWidget(self.estado)
         fila.addStretch()
+        self.boton_copiar_entrada = QPushButton("Copiar mensaje")
+        self.boton_copiar_entrada.setToolTip("Copia la selección o, si no seleccionaste texto, todo el mensaje.")
+        self.boton_copiar_entrada.clicked.connect(self._copiar_entrada)
+        v.addWidget(self.boton_copiar_entrada, alignment=Qt.AlignmentFlag.AlignRight)
         self.boton_enviar = QPushButton("Generar con Gemini")
         self.boton_enviar.setObjectName("primario")
+        self.boton_enviar.setMinimumWidth(172)
         self.boton_enviar.clicked.connect(self._enviar)
         self.boton_cancelar_chat = QPushButton("Cancelar generación")
         self.boton_cancelar_chat.setEnabled(False)
         self.boton_cancelar_chat.clicked.connect(self._cancelar_chat)
+        self.boton_sondeo = QPushButton("Intentar sondeo")
+        self.boton_sondeo.setToolTip("Prueba hasta 10 modelos por capacidad y selecciona el primero disponible, sin mensaje ni capturas.")
+        self.boton_sondeo.hide()
+        self.boton_sondeo.clicked.connect(self._intentar_sondeo)
+        self.ayuda_sondeo = QLabel(
+            "Sondeo: prueba una respuesta corta en hasta 10 modelos por capacidad. "
+            "No envía tus capturas ni garantiza que la generación funcione. "
+            "Si el modelo elegido vuelve a saturarse, buscamos la siguiente alternativa; "
+            "pulsa Generar para enviar tu solicitud. Los modelos fallidos se omiten durante 5 minutos."
+        )
+        self.ayuda_sondeo.setWordWrap(True)
+        self.ayuda_sondeo.hide()
+        v.addWidget(self.ayuda_sondeo)
+        fila.addWidget(self.boton_sondeo)
         fila.addWidget(self.boton_cancelar_chat)
         fila.addWidget(self.boton_enviar)
         v.addLayout(fila)
@@ -539,7 +717,7 @@ class AssistantView(QWidget):
         self._rotas = errores_de_descubrimiento()
         registradas = {spec.nombre for spec in listar()}
         self.combo_automatizacion.clear()
-        self.combo_automatizacion.addItem("Sin código adicional", None)
+        self.combo_automatizacion.addItem(translate("Sin código adicional"), None)
         for nombre in listar_en_disco():
             rota = nombre in self._rotas or nombre not in registradas
             self.combo_automatizacion.addItem(f"{nombre}  (no compila)" if rota else nombre, nombre)
@@ -548,8 +726,17 @@ class AssistantView(QWidget):
             if indice >= 0:
                 self.combo_automatizacion.setCurrentIndex(indice)
 
-    def _agregar_burbuja(self, rol: str, texto: str) -> None:
-        burbuja = _Burbuja(rol, texto)
+    def _al_cambiar_idioma(self) -> None:
+        """Retraduce contenido dinámico sin tocar mensajes, código ni adjuntos."""
+        indice_sin_codigo = self.combo_automatizacion.findData(None)
+        if indice_sin_codigo >= 0:
+            self.combo_automatizacion.setItemText(
+                indice_sin_codigo, translate("Sin código adicional")
+            )
+        self._refrescar_capturas()
+
+    def _agregar_burbuja(self, rol: str, texto: str, *, traducible: bool = False) -> None:
+        burbuja = _Burbuja(rol, texto, traducible=traducible)
         alineacion = Qt.AlignmentFlag.AlignRight if rol == "user" else Qt.AlignmentFlag.AlignLeft
         self._layout_mensajes.insertWidget(self._layout_mensajes.count() - 1, burbuja)
         QTimer.singleShot(0, lambda: self._area.verticalScrollBar().setValue(self._area.verticalScrollBar().maximum()))
@@ -576,7 +763,7 @@ class AssistantView(QWidget):
                 boton.clicked.connect(self._preparar_correccion)
             else:
                 boton.clicked.connect(
-                    lambda _checked=False, texto=prompt: self._usar_sugerencia(texto)
+                    lambda _checked=False, texto=prompt: self._usar_sugerencia(translate(texto))
                 )
             layout.addWidget(boton)
         layout.addStretch()
@@ -885,8 +1072,13 @@ class AssistantView(QWidget):
             item.setToolTip(str(ruta))
             self.lista_capturas.addItem(item)
         cantidad = len(self._capturas)
-        self.resumen_capturas.setText(f"{cantidad} captura(s) para el siguiente envío · máximo 12 MB"
-                                     if cantidad else "Sin capturas. Puedes describir el flujo solo con texto.")
+        if not cantidad:
+            resumen = "Sin capturas. Puedes describir el flujo solo con texto."
+        elif language.code == "en":
+            resumen = f"{cantidad} screenshot(s) for the next request · 12 MB maximum"
+        else:
+            resumen = f"{cantidad} captura(s) para el siguiente envío · máximo 12 MB"
+        self.resumen_capturas.setText(resumen)
         libre = self._worker is None and getattr(self, "_worker_capturas", None) is None
         self.boton_limpiar.setEnabled(bool(cantidad) and libre)
         self.boton_quitar.setEnabled(self.lista_capturas.currentRow() >= 0 and libre)
@@ -941,6 +1133,7 @@ class AssistantView(QWidget):
         visible = mensaje + (f"\n\nCapturas: {nombres_capturas}" if nombres_capturas else "")
         self._agregar_burbuja("user", visible)
         self.entrada.setReadOnly(True)
+        self.boton_sondeo.hide()
         self.boton_enviar.setEnabled(False)
         self.boton_crear.setEnabled(False)
         self.boton_copiar.setEnabled(False)
@@ -991,6 +1184,8 @@ class AssistantView(QWidget):
             return
         self._timer_pensando.stop()
         self.estado.setText(f"Respuesta de {respuesta.modelo}")
+        self._modelo_sondeado = None
+        self.ayuda_sondeo.hide()
         self._ultima_respuesta = respuesta.texto
         self.entrada.clear()
         self._historial.extend((("user", mensaje), ("model", respuesta.texto)))
@@ -1010,12 +1205,63 @@ class AssistantView(QWidget):
         self.estado.setText(f"No se pudo generar: {mensaje[:500]}")
         self.estado.setToolTip(mensaje)
         self._agregar_burbuja("model", f"No pude completar la solicitud.\n\n{mensaje}")
+        from engine.autocorreccion import Autocorrector
+        if Autocorrector._es_saturacion(mensaje):
+            modelo = self.combo_modelo.currentText().strip()
+            self._modelos_fallidos[modelo] = time.monotonic() + 300
+            self._continuar_sondeo = self._modelo_sondeado == modelo
+            self._modelo_sondeado = None
+        self.ayuda_sondeo.show()
+        self.boton_sondeo.show()
+        self.boton_sondeo.setEnabled(self._worker is None)
+
+    def _intentar_sondeo(self) -> None:
+        if self._worker is not None or self._worker_modelos is not None:
+            return
+        if not tiene_api_key():
+            self.estado.setText("Configura la clave de Gemini antes del sondeo.")
+            return
+        modelo = self.combo_modelo.currentText().strip()
+        self.estado.setText("Consultando hasta 10 modelos por capacidad, sin mensaje ni capturas…")
+        self._generacion_cancelada = False
+        self.boton_cancelar_chat.setEnabled(True)
+        self.boton_sondeo.setEnabled(False)
+        self.boton_enviar.setEnabled(False)
+        for widget in (self.combo_modelo, self.boton_modelos, self.boton_clave, self.boton_olvidar):
+            widget.setEnabled(False)
+        self._worker = _SondeoWorker(modelo)
+        self._modelos_fallidos = {m: hasta for m, hasta in self._modelos_fallidos.items()
+                                 if hasta > time.monotonic()}
+        self._worker.excluidos = set(self._modelos_fallidos)
+        self._worker.progreso.connect(self._sondeo_progreso)
+        self._worker.listo.connect(self._sondeo_listo)
+        self._worker.error.connect(self._sondeo_error)
+        self._worker.finished.connect(self._liberar_worker)
+        self._worker.start()
+
+    def _sondeo_listo(self, modelo: str) -> None:
+        if self._generacion_cancelada:
+            return
+        self.combo_modelo.setCurrentText(modelo)
+        self._modelo_sondeado = modelo
+        self.estado.setText(f"{modelo} respondió al sondeo. Puedes pulsar Generar con Gemini. La disponibilidad puede cambiar.")
+
+    def _sondeo_progreso(self, mensaje: str) -> None:
+        if not self._generacion_cancelada:
+            self.estado.setText(mensaje)
+
+    def _sondeo_error(self, mensaje: str) -> None:
+        if self._generacion_cancelada:
+            self.estado.setText("Sondeo cancelado. Mensaje y capturas conservados.")
+            return
+        self.estado.setText(f"No se pudo completar el sondeo: {mensaje[:500]}")
 
     def _liberar_worker(self) -> None:
         self.boton_cancelar_chat.setEnabled(False)
         if self._worker is not None:
             self._worker.deleteLater()
         self._worker = None
+        self.boton_sondeo.setEnabled(True)
         self.boton_enviar.setEnabled(True)
         self.boton_enviar.setText("Generar con Gemini")
         self.entrada.setReadOnly(False)
@@ -1026,11 +1272,22 @@ class AssistantView(QWidget):
         self._actualizar_estado_clave()
         self._refrescar_capturas()
 
+        if self._continuar_sondeo:
+            self._continuar_sondeo = False
+            if not self._generacion_cancelada:
+                self._intentar_sondeo()
+
     def _copiar_codigo(self) -> None:
         codigo = extraer_codigo_python(self._ultima_respuesta)
         if codigo:
             QApplication.clipboard().setText(codigo)
             self.estado.setText("Código copiado")
+
+    def _copiar_entrada(self) -> None:
+        if self.entrada.textCursor().hasSelection():
+            self.entrada.copy()
+        else:
+            QApplication.clipboard().setText(self.entrada.toPlainText())
 
     def _crear_automatizacion(self) -> None:
         codigo = extraer_codigo_python(self._ultima_respuesta)
@@ -1040,15 +1297,10 @@ class AssistantView(QWidget):
         coincidencia = re.search(r"nombre\s*=\s*[\"']([^\"']+)", codigo)
         if coincidencia:
             sugerido = normalizar_nombre(coincidencia.group(1)) or sugerido
-        nombre, aceptado = QInputDialog.getText(
-            self,
-            "Crear automatización",
-            "Nombre de carpeta y registro:",
-            text=sugerido,
-        )
-        if not aceptado:
+        dialogo = _CrearAutomatizacionDialog(sugerido, self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
-        nombre = normalizar_nombre(nombre)
+        nombre = dialogo.nombre_normalizado()
         try:
             codigo = preparar_codigo(codigo, nombre)
         except (SyntaxError, ValueError) as exc:
@@ -1081,6 +1333,8 @@ class AssistantView(QWidget):
             return
 
         self.estado.setText(f"“{nombre}” creada; revísala antes de ejecutar")
+        self.boton_crear.setText("✓ Automatización creada")
+        self._timer_feedback_creacion.start(2400)
         self.refrescar_contexto()
         if self.on_automatizacion_creada:
             self.on_automatizacion_creada(nombre)

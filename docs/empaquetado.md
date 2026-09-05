@@ -18,12 +18,32 @@ Hace tres cosas:
 
 1. `PyInstaller LaAutomate.spec --noconfirm` -> genera `dist/LaAutomate/`.
 2. Copia al lado del `.exe` lo que PyInstaller no incluye: `README.md`, `.env.example`,
-   la carpeta `automations/` y los dos `.bat` del instalador.
+   la carpeta `automations/`, la demo local (`demos/` y la plantilla Excel), la guía
+   de la demo y los dos `.bat` del instalador.
 3. Te dice qué correr para instalar.
 
 El paso 2 existe porque **PyInstaller borra `dist/LaAutomate/` en cada build**. Por eso
 los `.bat` viven versionados en `instalador/` y se copian al final, en vez de crearse a
 mano en cada rebuild.
+
+La copia la realiza `tools/copiar_paquete_publico.ps1` a partir de `git ls-files`.
+Por diseño, solo incorpora archivos versionados: una automatización creada en la
+instalación local, un reporte o una captura sin seguimiento nunca entra al paquete
+público por accidente.
+
+## Instalación sencilla desde el repositorio
+
+`INSTALAR_LAAUTOMATE.bat`, en la raíz, es el camino para una persona que descargó
+el código: comprueba Python 3.11+, crea `.venv`, instala `requirements.txt`, prepara
+`.env` y genera el acceso directo del escritorio. No construye PyInstaller y la
+carpeta descargada debe conservarse.
+
+## GitHub Releases
+
+`.github/workflows/windows-release.yml` se puede ejecutar manualmente para obtener
+un artefacto de prueba. Al subir una etiqueta `v*`, el mismo flujo ejecuta las
+pruebas deterministas, construye `LaAutomate-Windows-x64.zip` en Windows y lo adjunta
+a una GitHub Release. Esa es la distribución recomendada para usuarios sin Python.
 
 `empaquetar.bat` usa `.venv\Scripts\python.exe`: necesitas el entorno virtual del
 proyecto creado e instalado (ver [desarrollo](desarrollo.md)), con `pyinstaller` dentro.
@@ -42,8 +62,9 @@ dist\LaAutomate\INSTALL.bat
   con OneDrive corporativo la carpeta puede llamarse `OneDrive - Empresa\Desktop`, y
   suponer `%USERPROFILE%\Desktop` fallaba en silencio dejando la app donde el usuario
   nunca la ve.
-- **Conserva tus automatizaciones y tu `.env`** si ya había una instalación previa: los
-  respalda en `%TEMP%`, copia la versión nueva y los restaura encima.
+- **Conserva tus automatizaciones, tu `.env`, el historial, los logs y `datos/`** si ya
+  había una instalación previa: los respalda en `%LOCALAPPDATA%\LaAutomate_respaldos`,
+  copia la versión nueva y los restaura encima.
 - Migra desde el nombre anterior (`Luisautomate`): trae sus automatizaciones, borra su
   acceso directo y elimina la instalación vieja — salvo que tuviera automatizaciones
   propias sin migrar, en cuyo caso no la toca y te avisa dónde quedó.

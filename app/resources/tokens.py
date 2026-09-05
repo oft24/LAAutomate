@@ -325,6 +325,37 @@ QPushButton#peligro:disabled {{
 QDialog {{
     background-color: {c.papel};
 }}
+QDialog#crearAutomatizacionDialog {{
+    background-color: {c.papel};
+}}
+QFrame#dialogHero {{
+    background-color: {c.acento_suave};
+    border: 1px solid {c.borde_fuerte};
+    border-radius: {r.tarjeta}px;
+}}
+QLabel#dialogTitle {{
+    color: {c.tinta};
+    font-size: {t.t_h2}px;
+    font-weight: {t.peso_semibold};
+}}
+QLabel#dialogHint {{
+    color: {c.grafito};
+}}
+QLabel#dialogPreview {{
+    background-color: {c.tarjeta};
+    border: 1px solid {c.borde};
+    border-radius: {r.control}px;
+    color: {c.cian};
+    font-family: {t.familia_mono};
+    padding: {e.sm}px {e.md}px;
+}}
+QLabel#dialogError {{
+    background-color: {c.oxido_suave};
+    border: 1px solid {c.oxido};
+    border-radius: {r.control}px;
+    color: {c.oxido};
+    padding: {e.sm}px {e.md}px;
+}}
 QPushButton:focus, QPushButton#primario:focus, QPushButton#peligro:focus {{
     border-color: {c.cian};
 }}

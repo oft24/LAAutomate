@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QLabel, QWidget
+from app.i18n import QLabel
 
 from app.resources.tokens import COLORES, ESPACIADO
 

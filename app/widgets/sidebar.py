@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
+from app.i18n import QLabel, QPushButton, QToolButton
 
 from app.resources.iconos import icono
 from app.resources.tokens import COLORES, ESPACIADO

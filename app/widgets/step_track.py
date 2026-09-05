@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from app.i18n import QLabel, QPushButton
 
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.data_table import FilaEjecucion

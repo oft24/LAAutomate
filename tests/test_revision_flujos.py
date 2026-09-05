@@ -91,6 +91,99 @@ def test_respuesta_muestra_codigo_separado(asistente):
     assert not asistente.entrada.toPlainText()
 
 
+def test_cambiar_idioma_no_altera_borrador_codigo_o_capturas(asistente, tmp_path):
+    from app.i18n import language
+
+    captura = tmp_path / "captura.png"
+    asistente.entrada.setPlainText("Usa PRODUCTO_NOMBRE sin traducir")
+    asistente.codigo_resultado.setPlainText("print('hola')")
+    asistente._capturas = [captura]
+    asistente._refrescar_capturas()
+    try:
+        language.set("en", persist=False)
+        assert asistente.combo_automatizacion.itemText(0) == "No additional code"
+        assert "1 screenshot(s)" in asistente.resumen_capturas.text()
+        assert asistente.entrada.toPlainText() == "Usa PRODUCTO_NOMBRE sin traducir"
+        assert asistente.codigo_resultado.toPlainText() == "print('hola')"
+        assert asistente._capturas == [captura]
+    finally:
+        language.set("es", persist=False)
+
+
+def test_sondeo_solo_tras_fallo_y_conserva_solicitud(asistente, monkeypatch):
+    import app.windows.assistant_view as modulo
+    worker = MagicMock()
+    monkeypatch.setattr(modulo, "_SondeoWorker", worker)
+    assert asistente.boton_sondeo.isHidden()
+    asistente.entrada.setPlainText("Mi reporte")
+    asistente._enviar()
+    asistente._al_error("Modelo saturado")
+    asistente._liberar_worker()
+    assert not asistente.boton_sondeo.isHidden()
+    asistente._intentar_sondeo()
+    worker.assert_called_once_with(asistente.combo_modelo.currentText().strip())
+    assert not asistente.boton_enviar.isEnabled()
+    asistente._sondeo_listo("modelo")
+    asistente._liberar_worker()
+    assert asistente.entrada.toPlainText() == "Mi reporte"
+    assert asistente.boton_enviar.isEnabled()
+
+
+def test_worker_sondeo_no_genera_codigo(monkeypatch):
+    import app.windows.assistant_view as modulo
+    monkeypatch.setattr("engine.autocorreccion.Autocorrector._modelos_a_probar", lambda self: ["gemini-prueba"])
+    cliente = MagicMock()
+    monkeypatch.setattr(modulo, "GeminiClient", cliente)
+    worker = modulo._SondeoWorker("gemini-prueba")
+    worker.run()
+    cliente.return_value.comprobar_disponibilidad.assert_called_once_with()
+    cliente.return_value.generar.assert_not_called()
+
+
+def test_generacion_saturada_tras_sondeo_continua_sin_repetir(asistente, monkeypatch):
+    import app.windows.assistant_view as modulo
+    sondeo = MagicMock()
+    monkeypatch.setattr(modulo, "_SondeoWorker", sondeo)
+    asistente._generacion_cancelada = False
+    asistente._sondeo_listo("gemini-prueba")
+    asistente.entrada.setPlainText("Solicitud original")
+    asistente._enviar()
+    asistente._al_error("Modelo saturado")
+    asistente._liberar_worker()
+    sondeo.assert_called_once()
+    assert sondeo.return_value.excluidos == {"gemini-prueba"}
+    assert asistente.entrada.toPlainText() == "Solicitud original"
+    assert not asistente.ayuda_sondeo.isHidden()
+
+
+def test_sondeo_omite_modelo_que_fallo_generando(monkeypatch):
+    import app.windows.assistant_view as modulo
+    monkeypatch.setattr("engine.autocorreccion.Autocorrector._modelos_a_probar", lambda self: ["uno", "dos"])
+    cliente = MagicMock()
+    monkeypatch.setattr(modulo, "GeminiClient", cliente)
+    worker = modulo._SondeoWorker("uno")
+    worker.excluidos = {"uno"}
+    worker.run()
+    cliente.assert_called_once_with(modelo="dos", reintentos=0)
+
+
+def test_sondeo_avanza_por_capacidad_y_para_al_responder(monkeypatch):
+    import app.windows.assistant_view as modulo
+    from core.gemini_client import ErrorGemini
+    monkeypatch.setattr("engine.autocorreccion.Autocorrector._modelos_a_probar", lambda self: ["uno", "dos", "tres"])
+    clientes = {nombre: MagicMock() for nombre in ("uno", "dos", "tres")}
+    clientes["uno"].comprobar_disponibilidad.side_effect = ErrorGemini("modelo saturado")
+    monkeypatch.setattr(modulo, "GeminiClient", lambda modelo, **kw: clientes[modelo])
+    worker = modulo._SondeoWorker("elegido")
+    resultados = []
+    worker.listo.connect(resultados.append)
+    worker.run()
+    assert resultados == ["dos"]
+    clientes["tres"].comprobar_disponibilidad.assert_not_called()
+    for cliente in clientes.values():
+        cliente.generar.assert_not_called()
+
+
 def test_cancelar_descarta_respuesta_y_conserva_texto(asistente):
     asistente.entrada.setPlainText("Mi solicitud")
     asistente._enviar()

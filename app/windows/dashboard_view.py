@@ -9,6 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QStackedLayout, QVBoxLayout, QWidget
+from app.i18n import QLabel
 
 from app.resources.tokens import COLORES, ESPACIADO, TIPO
 from app.widgets.data_table import DataTable, FilaEjecucion

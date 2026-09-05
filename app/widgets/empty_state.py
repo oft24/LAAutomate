@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from app.i18n import QLabel, QPushButton
 
 from app.resources.tokens import COLORES, ESPACIADO
 

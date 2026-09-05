@@ -1,5 +1,5 @@
 """Markdown de solo lectura, sin cargar recursos ni navegar enlaces externos."""
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QFrame, QTextBrowser
 
@@ -12,6 +12,9 @@ class ChatText(QTextBrowser):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setOpenLinks(False)
         self.setOpenExternalLinks(False)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse |
+                                     Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setStyleSheet(f"background: transparent; border: none; padding: 0; color: {COLORES.tinta}; font-size: 13px;")
         self.document().setDefaultStyleSheet(
             f"p {{ margin: 4px 0; }} pre {{ background-color: {COLORES.papel}; white-space: pre-wrap; }} "

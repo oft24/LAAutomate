@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.i18n import QLineEdit, QTableWidget
+from app.i18n import QLabel, QPushButton
 
 from app.resources.tokens import COLORES, DENSIDAD, ESPACIADO, TIPO
 from app.widgets.empty_state import EmptyState

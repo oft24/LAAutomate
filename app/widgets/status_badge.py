@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
+from app.i18n import QLabel
 
 from app.resources.tokens import COLORES, ESPACIADO
 

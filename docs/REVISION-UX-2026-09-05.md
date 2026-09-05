@@ -5,6 +5,10 @@ actualizado: 2026-09-05
 
 # Revisión funcional y UX — LaAutomate
 
+> Este informe conserva la fotografía de la revisión UX de esa fecha. La
+> validación posterior y reproducible está resumida en el
+> [README público](../README.md); por eso sus cifras de pruebas pueden diferir.
+
 ## Resultado
 
 Se conservó la interfaz oscura con acentos verde/cian, el icono actual y la

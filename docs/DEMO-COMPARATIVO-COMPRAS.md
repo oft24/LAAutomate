@@ -52,7 +52,7 @@ Indica que son datos ficticios de una página local de pruebas. Si aceleras la g
 
 ## Validación reproducible
 
-Validado el 5 de septiembre de 2026: 12 pruebas aprobadas entre `test_demo_compras.py` y `test_runner_excel.py`. Incluye dos ejecuciones reales de la clase de automatización con Selenium y acciones Excel; no se pulsaron controles de la interfaz durante esa prueba. La verificación del navegador se hizo sin ventana y solo contra el catálogo local.
+Validado el 5 de septiembre de 2026: el conjunto cubre 12 casos entre `test_demo_compras.py` y `test_runner_excel.py`. En la ejecución anterior se aprobaron los 12, incluyendo dos ejecuciones reales de la clase de automatización con Selenium y acciones Excel; no se pulsaron controles de la interfaz durante esa prueba. En la repetición actual, 11 casos aprobaron y el caso de navegador quedó bloqueado por una sesión Chrome WebDriver que se cerró y por no disponer de EdgeDriver en modo offline. La verificación del navegador, cuando el driver está disponible, se hace sin ventana y solo contra el catálogo local.
 
 `tests/test_demo_compras.py` comprueba cantidades, envío, empate, falta de stock, productos inexistentes, duplicados, lectura del Excel entregado y dos ejecuciones sucesivas con navegador real. La prueba de navegador se habilita con `LAAUTOMATE_DEMO_BROWSER=1`. Usa carpetas temporales; no edita tu lista original.
 
